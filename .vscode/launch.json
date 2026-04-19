@@ -1,0 +1,85 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(lldb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RealsenseViewer",
+            "args": [
+                "--serial",
+                "053122251294"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "targetArchitecture": "arm64",
+            "preLaunchTask": "CMake: build",
+            "logging": {
+                "engineLogging": false,
+                "moduleLoad": false,
+                "programOutput": true,
+                "trace": false,
+                "traceResponse": false
+            }
+        },
+        {
+            "name": "(sudo lldb-mi) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RealsenseViewer",
+            "args": [
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "requireExactSource": false,
+            "miDebuggerPath": "${workspaceFolder}/.vscode/sudo-lldb-mi.sh",
+            "targetArchitecture": "arm64",
+            "preLaunchTask": "CMake: build",
+            "setupCommands": [
+                {
+                    "text": "settings set target.source-map /Users/rudipirani/VSCode/RealsenseViewer ${workspaceFolder}"
+                }
+            ],
+            "logging": {
+                "engineLogging": false,
+                "moduleLoad": false,
+                "programOutput": true,
+                "trace": false,
+                "traceResponse": false
+            }
+        },
+        {
+            "name": "(lldb) List RealSense devices",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RealsenseViewer",
+            "args": [
+                "--list-devices"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "targetArchitecture": "arm64",
+            "preLaunchTask": "CMake: build",
+            "logging": {
+                "engineLogging": false,
+                "moduleLoad": false,
+                "programOutput": true,
+                "trace": false,
+                "traceResponse": false
+            }
+        }
+
+    ]
+}

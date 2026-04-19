@@ -1,0 +1,119 @@
+{
+    "tasks": [
+        {
+            "label": "CMake: configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build",
+                "-DCMAKE_BUILD_TYPE=Debug",
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Configure RealsenseViewer"
+        },
+        {
+            "label": "CMake: build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [
+                "CMake: configure"
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Build RealsenseViewer"
+        },
+        {
+            "label": "Run: viewer with sudo",
+            "type": "shell",
+            "command": "sudo",
+            "args": [
+                "${workspaceFolder}/build/RealsenseViewer",
+                "--serial",
+                "053122251294"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [
+                "CMake: build"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "detail": "Run RealsenseViewer with sudo so librealsense can access the D455"
+        },
+        {
+            "label": "Run: list devices with sudo",
+            "type": "shell",
+            "command": "sudo",
+            "args": [
+                "${workspaceFolder}/build/RealsenseViewer",
+                "--list-devices"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [
+                "CMake: build"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "detail": "List RealSense devices with sudo using the app diagnostics"
+        },
+        {
+            "label": "Debug: sudo lldb terminal",
+            "type": "shell",
+            "command": "sudo",
+            "args": [
+                "-k",
+                "lldb",
+                "--",
+                "${workspaceFolder}/build/RealsenseViewer",
+                "--serial",
+                "053122251294"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [
+                "CMake: build"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "detail": "Open an elevated LLDB session for the RealSense viewer"
+        }
+    ],
+    "version": "2.0.0"
+}
