@@ -2,22 +2,28 @@
 
 C++17 RealSense D455 viewer using librealsense for capture and OpenCV for display.
 
-The app opens one OpenCV window for every D455 video stream it enables:
+The app opens an OpenCV dashboard with stream visibility checkboxes:
 
 - Depth, color, infrared 1, infrared 2
-- Accel and gyro samples in a small motion panel, when requested
+- PCL-computed point cloud from the depth stream in a separate navigable 3D window
+- Accel and gyro samples in a motion tile, when requested
+- Click a stream name or checkbox to show/hide that stream
+- Press number keys 1-9 to toggle the matching stream quickly
+- Use the point cloud window mouse controls to rotate, pan, and zoom
+- Open a calibration image and tick `Run object detection` to match it against the live Color image
 
 ## Requirements
 
 - CMake 3.22+
 - OpenCV
+- PCL
 - Intel RealSense SDK 2.0 / librealsense2
 - A connected Intel RealSense D455
 
 On macOS with Homebrew, the usual setup is:
 
 ```sh
-brew install cmake opencv librealsense
+brew install cmake opencv pcl librealsense
 ```
 
 ## Build
@@ -88,7 +94,7 @@ continue
 quit
 ```
 
-Press `q` or `Esc` in any OpenCV window to quit.
+Press `q` or `Esc` in the OpenCV dashboard to quit.
 
 
 By default the app uses known D455 video profiles instead of asking the SDK to
@@ -116,5 +122,5 @@ unplug/replug the camera, and rerun the SDK tools from Terminal.
 - `IFrameSource` is the camera abstraction.
 - `RealSenseFrameSource` implements `IFrameSource` with librealsense.
 - `IFramePresenter` is the display abstraction.
-- `OpenCvFramePresenter` implements `IFramePresenter` with OpenCV windows.
+- `OpenCvFramePresenter` implements `IFramePresenter` with an OpenCV dashboard.
 - `Application` owns the run loop and only depends on the interfaces.

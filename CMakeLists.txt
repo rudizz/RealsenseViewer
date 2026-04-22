@@ -14,7 +14,8 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
 endif()
 
-find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc)
+find_package(OpenCV REQUIRED COMPONENTS calib3d core features2d highgui imgcodecs imgproc xfeatures2d)
+find_package(PCL REQUIRED COMPONENTS common filters visualization)
 find_package(realsense2 CONFIG
     HINTS
         /opt/homebrew/opt/librealsense/lib/cmake/realsense2
@@ -35,16 +36,24 @@ add_executable(RealsenseViewer
     src/camera/RealSenseDiagnostics.cpp
     src/camera/RealSenseFrameSource.cpp
     src/display/OpenCvFramePresenter.cpp
+    src/features/ObjectFeatureMatcher.cpp
 )
 
 target_include_directories(RealsenseViewer
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${PCL_INCLUDE_DIRS}
+)
+
+target_compile_definitions(RealsenseViewer
+    PRIVATE
+        ${PCL_DEFINITIONS}
 )
 
 target_link_libraries(RealsenseViewer
     PRIVATE
         ${OpenCV_LIBS}
+        ${PCL_LIBRARIES}
 )
 
 if(TARGET realsense2::realsense2)

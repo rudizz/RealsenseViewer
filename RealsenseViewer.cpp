@@ -21,7 +21,9 @@ void printUsage(const char* executableName)
               << "  --list-devices          Print devices visible to librealsense and exit\n"
               << "  --no-motion             Keep IMU streams disabled\n\n"
               << "Keys while running:\n"
-              << "  q or Esc    Quit the viewer\n";
+              << "  q or Esc    Quit the viewer\n"
+              << "  1-9         Toggle stream visibility\n"
+              << "  mouse       Click dashboard controls\n";
 }
 
 } // namespace

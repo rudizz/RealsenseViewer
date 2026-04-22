@@ -2,9 +2,13 @@
 #include "realsenseviewer/camera/RealSenseFrameSource.hpp"
 
 #include <opencv2/imgproc.hpp>
+#include <pcl/filters/voxel_grid.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -12,6 +16,12 @@
 
 namespace rsv {
 namespace {
+
+constexpr unsigned int kFrameWaitTimeoutMs = 500;
+constexpr auto kNoFrameWarningInterval = std::chrono::seconds(3);
+constexpr int kPointCloudPixelStep = 2;
+constexpr float kPointCloudMaxDistanceMeters = 6.0F;
+constexpr float kPointCloudVoxelLeafMeters = 0.025F;
 
 bool hasFormat(const std::vector<rs2_format>& formats, rs2_format format)
 {
@@ -60,6 +70,15 @@ std::string serialNumberOf(const rs2::device& device)
     return device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
 }
 
+void setDepthColor(pcl::PointXYZRGB& point, float zMeters)
+{
+    const float normalized = std::clamp(zMeters / kPointCloudMaxDistanceMeters, 0.0F, 1.0F);
+
+    point.r = static_cast<std::uint8_t>(255.0F * normalized);
+    point.g = static_cast<std::uint8_t>(255.0F * (1.0F - std::abs((normalized * 2.0F) - 1.0F)));
+    point.b = static_cast<std::uint8_t>(255.0F * (1.0F - normalized));
+}
+
 } // namespace
 
 RealSenseFrameSource::RealSenseFrameSource(RealSenseSettings settings)
@@ -86,7 +105,8 @@ void RealSenseFrameSource::start()
     try {
         pipeline_.start(config);
         running_ = true;
-        std::cout << "RealSense pipeline started. Press q or Esc in an OpenCV window to quit.\n";
+        nextNoFrameWarning_ = std::chrono::steady_clock::now() + kNoFrameWarningInterval;
+        std::cout << "RealSense pipeline started. Press q or Esc in the OpenCV dashboard to quit.\n";
     } catch (const rs2::error& error) {
         std::ostringstream message;
         message << "could not start RealSense pipeline: " << error.what()
@@ -119,12 +139,24 @@ bool RealSenseFrameSource::poll(FrameBundle& output)
     }
 
     rs2::frameset frameset;
-    if (!pipeline_.poll_for_frames(&frameset)) {
+    if (!pipeline_.try_wait_for_frames(&frameset, kFrameWaitTimeoutMs)) {
+        std::cerr << "RealSense frame wait timed out after " << kFrameWaitTimeoutMs << " ms.\n";
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextNoFrameWarning_) {
+            std::cerr << "Still waiting for RealSense frames from the active pipeline...\n";
+            nextNoFrameWarning_ = now + kNoFrameWarningInterval;
+        }
+
         return false;
     }
 
     FrameBundle bundle;
     for (const rs2::frame& frame : frameset) {
+        if (auto pointCloud = convertPointCloudFrame(frame)) {
+            bundle.pointCloudFrames.push_back(std::move(*pointCloud));
+        }
+
         if (auto video = convertVideoFrame(frame)) {
             bundle.videoFrames.push_back(std::move(*video));
             continue;
@@ -132,6 +164,14 @@ bool RealSenseFrameSource::poll(FrameBundle& output)
 
         if (auto motion = convertMotionFrame(frame)) {
             bundle.motionSamples.push_back(std::move(*motion));
+        }
+    }
+
+    if (bundle.empty()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextNoFrameWarning_) {
+            std::cerr << "RealSense delivered frames, but none used a displayable video or motion format.\n";
+            nextNoFrameWarning_ = now + kNoFrameWarningInterval;
         }
     }
 
@@ -409,6 +449,74 @@ std::optional<VideoFrame> RealSenseFrameSource::convertVideoFrame(const rs2::fra
         frameName(frame),
         details.str(),
         std::move(bgrImage),
+        frame.get_timestamp(),
+    };
+}
+
+std::optional<PointCloudFrame> RealSenseFrameSource::convertPointCloudFrame(const rs2::frame& frame) const
+{
+    const auto depth = frame.as<rs2::depth_frame>();
+    if (!depth || depth.get_profile().format() != RS2_FORMAT_Z16) {
+        return std::nullopt;
+    }
+
+    const auto videoProfile = depth.get_profile().as<rs2::video_stream_profile>();
+    if (!videoProfile) {
+        return std::nullopt;
+    }
+
+    const int width = depth.get_width();
+    const int height = depth.get_height();
+    const auto stride = static_cast<size_t>(depth.get_stride_in_bytes());
+    const auto intrinsics = videoProfile.get_intrinsics();
+    const auto* depthRow = static_cast<const std::uint8_t*>(depth.get_data());
+    const float depthUnits = depth.get_units();
+
+    auto rawCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+    rawCloud->points.reserve(static_cast<size_t>((width / kPointCloudPixelStep) * (height / kPointCloudPixelStep)));
+    rawCloud->is_dense = false;
+
+    for (int y = 0; y < height; y += kPointCloudPixelStep) {
+        const auto* row = reinterpret_cast<const std::uint16_t*>(depthRow + (static_cast<size_t>(y) * stride));
+        for (int x = 0; x < width; x += kPointCloudPixelStep) {
+            const std::uint16_t rawDepth = row[x];
+            if (rawDepth == 0) {
+                continue;
+            }
+
+            const float zMeters = static_cast<float>(rawDepth) * depthUnits;
+            if (zMeters <= 0.0F || zMeters > kPointCloudMaxDistanceMeters) {
+                continue;
+            }
+
+            pcl::PointXYZRGB point;
+            point.x = ((static_cast<float>(x) - intrinsics.ppx) / intrinsics.fx) * zMeters;
+            point.y = ((static_cast<float>(y) - intrinsics.ppy) / intrinsics.fy) * zMeters;
+            point.z = zMeters;
+            setDepthColor(point, zMeters);
+            rawCloud->points.push_back(point);
+        }
+    }
+
+    rawCloud->width = static_cast<std::uint32_t>(rawCloud->points.size());
+    rawCloud->height = 1;
+
+    auto filteredCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+    if (!rawCloud->points.empty()) {
+        pcl::VoxelGrid<pcl::PointXYZRGB> voxelGrid;
+        voxelGrid.setInputCloud(rawCloud);
+        voxelGrid.setLeafSize(kPointCloudVoxelLeafMeters, kPointCloudVoxelLeafMeters, kPointCloudVoxelLeafMeters);
+        voxelGrid.filter(*filteredCloud);
+    }
+
+    std::ostringstream details;
+    details << filteredCloud->points.size() << " points  voxel "
+            << std::fixed << std::setprecision(1) << (kPointCloudVoxelLeafMeters * 100.0F) << "cm";
+
+    return PointCloudFrame {
+        "Point Cloud",
+        details.str(),
+        std::move(filteredCloud),
         frame.get_timestamp(),
     };
 }
