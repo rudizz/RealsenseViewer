@@ -1,4 +1,4 @@
-# RealsenseViewer
+# RealsenseViewer with 2D Object detection
 
 C++17 RealSense D455 viewer using librealsense for capture and OpenCV for display.
 

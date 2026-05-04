@@ -13,6 +13,7 @@
 #include <vector>
 
 namespace pcl::visualization {
+class KeyboardEvent;
 class PCLVisualizer;
 } // namespace pcl::visualization
 
@@ -37,8 +38,9 @@ private:
     void openCalibrationImage();
     void setFeatureDetectorType(features::FeatureDetectorType detectorType);
     void setFeatureMatcherType(features::FeatureMatcherType matcherType);
+    void setCalibrationResampleScale(double scale);
     void updateFrames(const FrameBundle& bundle);
-    void ensureStreamControl(const std::string& name);
+    void ensureStreamControl(const std::string& name, bool visibleByDefault = true);
     void updateFeatureMatch(const VideoFrame& frame);
     void renderDashboard();
     void drawSidebar(cv::Mat& canvas);
@@ -49,6 +51,10 @@ private:
     void drawObjectMatchOverlay(cv::Mat& image) const;
     void drawMotionTile(cv::Mat& canvas, const cv::Rect& tileBounds) const;
     void updatePointCloudViewer();
+    void onPointCloudKeyboard(const pcl::visualization::KeyboardEvent& event);
+    void adjustPointCloudPixelStep(int delta);
+    void updatePointCloudHelpText();
+    [[nodiscard]] std::string pointCloudHelpText() const;
     void shutdownPointCloudViewer();
     void spinPointCloudViewer();
     [[nodiscard]] std::vector<std::string> visibleVideoStreams() const;
@@ -68,6 +74,8 @@ private:
     std::vector<std::pair<features::FeatureDetectorType, cv::Rect>> detectorOptionBounds_;
     cv::Rect matcherComboBounds_;
     std::vector<std::pair<features::FeatureMatcherType, cv::Rect>> matcherOptionBounds_;
+    cv::Rect resampleComboBounds_;
+    std::vector<std::pair<double, cv::Rect>> resampleOptionBounds_;
     cv::Rect objectDetectionBounds_;
     features::ObjectFeatureMatcher featureMatcher_;
     std::optional<features::MatchResult> latestObjectMatch_;
@@ -79,6 +87,7 @@ private:
     bool objectDetectionEnabled_ = false;
     bool detectorDropdownOpen_ = false;
     bool matcherDropdownOpen_ = false;
+    bool resampleDropdownOpen_ = false;
     bool windowInitialized_ = false;
 };
 

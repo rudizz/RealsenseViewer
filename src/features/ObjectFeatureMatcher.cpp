@@ -7,6 +7,7 @@
 #include <opencv2/xfeatures2d.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace rsv::features {
 namespace {
@@ -17,8 +18,8 @@ constexpr int kMinimumGoodMatches = 10;
 constexpr int kMinimumInliers = 10;
 constexpr double kMinimumConfidence = 0.15;
 constexpr double kLoweRatio = 0.74;
-constexpr double kRansacReprojectionThreshold = 4.0;
-constexpr double kMinimumProjectedArea = 600.0;
+constexpr double kRansacReprojectionThreshold = 2.0;
+constexpr double kMinimumProjectedArea = 100.0;
 
 cv::Mat toGray(const cv::Mat& image)
 {
@@ -67,13 +68,36 @@ void ObjectFeatureMatcher::setMatcherType(FeatureMatcherType matcherType)
     matcherType_ = matcherType;
 }
 
+bool ObjectFeatureMatcher::setCalibrationResampleScale(double scale)
+{
+    if (calibrationResampleScale_ == scale) {
+        return true;
+    }
+
+    const std::string previousCalibrationImagePath = calibrationImagePath_;
+    calibrationResampleScale_ = scale;
+    if (previousCalibrationImagePath.empty()) {
+        clearCalibration();
+        return true;
+    }
+
+    return loadCalibrationImage(previousCalibrationImagePath);
+}
+
 bool ObjectFeatureMatcher::loadCalibrationImage(const std::string& imagePath)
 {
     clearCalibration();
 
-    const cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);
+    cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);
     if (image.empty()) {
         return false;
+    }
+
+    if (calibrationResampleScale_ != 1.0) {
+        const cv::Size targetSize(
+            std::max(1, static_cast<int>(std::round(image.cols * calibrationResampleScale_))),
+            std::max(1, static_cast<int>(std::round(image.rows * calibrationResampleScale_))));
+        cv::resize(image, image, targetSize, 0.0, 0.0, cv::INTER_LINEAR);
     }
 
     std::vector<cv::KeyPoint> keypoints;
@@ -186,6 +210,11 @@ FeatureDetectorType ObjectFeatureMatcher::detectorType() const
 FeatureMatcherType ObjectFeatureMatcher::matcherType() const
 {
     return matcherType_;
+}
+
+double ObjectFeatureMatcher::calibrationResampleScale() const
+{
+    return calibrationResampleScale_;
 }
 
 const char* ObjectFeatureMatcher::detectorName() const

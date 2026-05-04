@@ -30,12 +30,14 @@ struct MatchResult {
 class ObjectFeatureMatcher {
 public:
     [[nodiscard]] bool setDetectorType(FeatureDetectorType detectorType);
+    [[nodiscard]] bool setCalibrationResampleScale(double scale);
     void setMatcherType(FeatureMatcherType matcherType);
     [[nodiscard]] bool loadCalibrationImage(const std::string& imagePath);
     [[nodiscard]] std::optional<MatchResult> match(const cv::Mat& colorImage) const;
 
     [[nodiscard]] FeatureDetectorType detectorType() const;
     [[nodiscard]] FeatureMatcherType matcherType() const;
+    [[nodiscard]] double calibrationResampleScale() const;
     [[nodiscard]] const char* detectorName() const;
     [[nodiscard]] const char* matcherName() const;
     [[nodiscard]] bool hasCalibration() const;
@@ -56,7 +58,8 @@ private:
     cv::Mat calibrationFeatureImage_;
     cv::Ptr<cv::Feature2D> detector_ = cv::SIFT::create(1600);
     FeatureDetectorType detectorType_ = FeatureDetectorType::Sift;
-    FeatureMatcherType matcherType_ = FeatureMatcherType::BruteForce;
+    FeatureMatcherType matcherType_ = FeatureMatcherType::Flann;
+    double calibrationResampleScale_ = 1.0;
 };
 
 } // namespace rsv::features

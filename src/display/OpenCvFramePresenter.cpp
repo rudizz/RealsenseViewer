@@ -1,7 +1,10 @@
 #include "realsenseviewer/display/OpenCvFramePresenter.hpp"
 
+#include "realsenseviewer/camera/RealSenseFrameSource.hpp"
+
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+#include <pcl/visualization/keyboard_event.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
 #include <algorithm>
@@ -31,13 +34,15 @@ constexpr int kDashboardHeight = 820;
 constexpr int kSidebarWidth = 300;
 constexpr int kGap = 12;
 constexpr int kTileHeaderHeight = 38;
-constexpr int kStreamListStartY = 156;
+constexpr int kStreamListStartY = 106;
 constexpr int kDetectionSectionGap = 20;
-constexpr int kCalibrationPreviewHeight = 150;
+constexpr int kCalibrationPreviewHeight = 200;
 constexpr int kDetectorComboHeight = 32;
 constexpr int kDetectorOptionHeight = 28;
 constexpr int kMatcherComboHeight = 32;
 constexpr int kMatcherOptionHeight = 28;
+constexpr int kResampleComboHeight = 32;
+constexpr int kResampleOptionHeight = 28;
 constexpr const char* kPointCloudWindowName = "RealSense Point Cloud";
 constexpr const char* kPointCloudId = "realsense-point-cloud";
 constexpr const char* kPointCloudHelpTextId = "point-cloud-help-text";
@@ -190,6 +195,13 @@ const char* matcherTypeLabel(features::FeatureMatcherType matcherType)
     return "Unknown";
 }
 
+std::string resampleScaleLabel(double scale)
+{
+    std::ostringstream label;
+    label << std::fixed << std::setprecision(scale < 1.0 ? 3 : 1) << scale;
+    return label.str();
+}
+
 } // namespace
 
 OpenCvFramePresenter::~OpenCvFramePresenter()
@@ -292,9 +304,29 @@ void OpenCvFramePresenter::onMouse(int event, int x, int y)
         }
     }
 
+    if (resampleDropdownOpen_) {
+        for (const auto& [scale, bounds] : resampleOptionBounds_) {
+            if (!bounds.contains(click)) {
+                continue;
+            }
+
+            setCalibrationResampleScale(scale);
+            resampleDropdownOpen_ = false;
+            renderDashboard();
+            return;
+        }
+
+        if (!resampleComboBounds_.contains(click)) {
+            resampleDropdownOpen_ = false;
+            renderDashboard();
+            return;
+        }
+    }
+
     if (calibrationButtonBounds_.contains(click)) {
         detectorDropdownOpen_ = false;
         matcherDropdownOpen_ = false;
+        resampleDropdownOpen_ = false;
         openCalibrationImage();
         renderDashboard();
         return;
@@ -303,6 +335,7 @@ void OpenCvFramePresenter::onMouse(int event, int x, int y)
     if (detectorComboBounds_.contains(click)) {
         detectorDropdownOpen_ = !detectorDropdownOpen_;
         matcherDropdownOpen_ = false;
+        resampleDropdownOpen_ = false;
         renderDashboard();
         return;
     }
@@ -310,6 +343,15 @@ void OpenCvFramePresenter::onMouse(int event, int x, int y)
     if (matcherComboBounds_.contains(click)) {
         matcherDropdownOpen_ = !matcherDropdownOpen_;
         detectorDropdownOpen_ = false;
+        resampleDropdownOpen_ = false;
+        renderDashboard();
+        return;
+    }
+
+    if (resampleComboBounds_.contains(click)) {
+        resampleDropdownOpen_ = !resampleDropdownOpen_;
+        detectorDropdownOpen_ = false;
+        matcherDropdownOpen_ = false;
         renderDashboard();
         return;
     }
@@ -317,6 +359,7 @@ void OpenCvFramePresenter::onMouse(int event, int x, int y)
     if (objectDetectionBounds_.contains(click)) {
         detectorDropdownOpen_ = false;
         matcherDropdownOpen_ = false;
+        resampleDropdownOpen_ = false;
         objectDetectionEnabled_ = !objectDetectionEnabled_;
         if (!objectDetectionEnabled_) {
             latestObjectMatch_.reset();
@@ -345,6 +388,7 @@ void OpenCvFramePresenter::onMouse(int event, int x, int y)
 
         detectorDropdownOpen_ = false;
         matcherDropdownOpen_ = false;
+        resampleDropdownOpen_ = false;
         streamVisibility_[streamName] = !isStreamVisible(streamName);
         if (latestPointCloudFrames_.find(streamName) != latestPointCloudFrames_.end()) {
             updatePointCloudViewer();
@@ -411,6 +455,38 @@ void OpenCvFramePresenter::setFeatureMatcherType(features::FeatureMatcherType ma
     featureMatchStatus_ = std::string(featureMatcher_.matcherName()) + " matcher selected";
 }
 
+void OpenCvFramePresenter::setCalibrationResampleScale(double scale)
+{
+    if (featureMatcher_.calibrationResampleScale() == scale) {
+        return;
+    }
+
+    latestObjectMatch_.reset();
+    const bool calibrationReloaded = featureMatcher_.setCalibrationResampleScale(scale);
+    if (!calibrationReloaded) {
+        calibrationImageLabel_.clear();
+        latestFeatureMatchMs_.reset();
+        featureMatchStatus_ = "Could not extract enough features at " + resampleScaleLabel(scale);
+        return;
+    }
+
+    if (!featureMatcher_.hasCalibration()) {
+        latestFeatureMatchMs_.reset();
+        featureMatchStatus_ = "Resample " + resampleScaleLabel(scale) + " selected";
+        return;
+    }
+
+    std::ostringstream status;
+    status << "Resample " << resampleScaleLabel(scale) << ": "
+           << featureMatcher_.calibrationKeypointCount() << " features";
+    featureMatchStatus_ = status.str();
+
+    const auto colorFrame = latestVideoFrames_.find("Color");
+    if (objectDetectionEnabled_ && colorFrame != latestVideoFrames_.end()) {
+        updateFeatureMatch(colorFrame->second);
+    }
+}
+
 void OpenCvFramePresenter::openCalibrationImage()
 {
     const std::optional<std::string> selectedImage = chooseImageFile();
@@ -453,7 +529,7 @@ void OpenCvFramePresenter::updateFrames(const FrameBundle& bundle)
     }
 
     for (const PointCloudFrame& frame : bundle.pointCloudFrames) {
-        ensureStreamControl(frame.name);
+        ensureStreamControl(frame.name, false);
         latestPointCloudFrames_[frame.name] = frame;
     }
 
@@ -463,13 +539,13 @@ void OpenCvFramePresenter::updateFrames(const FrameBundle& bundle)
     }
 }
 
-void OpenCvFramePresenter::ensureStreamControl(const std::string& name)
+void OpenCvFramePresenter::ensureStreamControl(const std::string& name, bool visibleByDefault)
 {
     if (streamVisibility_.find(name) != streamVisibility_.end()) {
         return;
     }
 
-    streamVisibility_[name] = true;
+    streamVisibility_[name] = visibleByDefault;
     streamOrder_.push_back(name);
 }
 
@@ -507,10 +583,11 @@ void OpenCvFramePresenter::updateFeatureMatch(const VideoFrame& frame)
     }
 
     std::ostringstream status;
-    status << "Object found: " << latestObjectMatch_->inliers << "/" << latestObjectMatch_->goodMatches
+    status << latestObjectMatch_->inliers << "/" << latestObjectMatch_->goodMatches
            << " inliers, confidence " << std::fixed << std::setprecision(2)
            << latestObjectMatch_->confidence;
     featureMatchStatus_ = status.str();
+
 }
 
 void OpenCvFramePresenter::renderDashboard()
@@ -519,6 +596,7 @@ void OpenCvFramePresenter::renderDashboard()
     streamHitBoxes_.clear();
     detectorOptionBounds_.clear();
     matcherOptionBounds_.clear();
+    resampleOptionBounds_.clear();
 
     drawSidebar(canvas);
 
@@ -593,9 +671,7 @@ void OpenCvFramePresenter::drawSidebar(cv::Mat& canvas)
         cv::LINE_AA);
 
     putTextLine(canvas, "RealSense Viewer", cv::Point(18, 38), 0.8, kTextColor, 2);
-    putTextLine(canvas, "Click streams to show or hide them", cv::Point(18, 72), 0.48, kMutedTextColor);
-    putTextLine(canvas, "Point Cloud opens a 3D window", cv::Point(18, 96), 0.48, kMutedTextColor);
-    putTextLine(canvas, "q or Esc quits", cv::Point(18, 120), 0.48, kMutedTextColor);
+    putTextLine(canvas, "Press q or Esc to quit", cv::Point(18, 72), 0.48, kMutedTextColor);
 
     int y = kStreamListStartY;
     if (streamOrder_.empty()) {
@@ -707,7 +783,59 @@ void OpenCvFramePresenter::drawCalibrationButton(cv::Mat& canvas, int y)
             cv::LINE_AA);
     }
 
-    const int detectionY = y + 204;
+    const int resampleLabelY = y + 192;
+    putTextLine(canvas, "Resample", cv::Point(18, resampleLabelY), 0.47, kMutedTextColor);
+
+    resampleComboBounds_ = cv::Rect(12, resampleLabelY + 10, kSidebarWidth - 24, kResampleComboHeight);
+    cv::rectangle(canvas, resampleComboBounds_, cv::Scalar(41, 48, 52), cv::FILLED);
+    cv::rectangle(
+        canvas,
+        resampleComboBounds_,
+        resampleDropdownOpen_ ? kAccentColor : kPanelBorderColor,
+        1,
+        cv::LINE_AA);
+    putTextLine(
+        canvas,
+        resampleScaleLabel(featureMatcher_.calibrationResampleScale()),
+        cv::Point(resampleComboBounds_.x + 12, resampleComboBounds_.y + 22),
+        0.55,
+        kTextColor);
+
+    const int resampleArrowX = resampleComboBounds_.x + resampleComboBounds_.width - 22;
+    const int resampleArrowY = resampleComboBounds_.y + 13;
+    if (resampleDropdownOpen_) {
+        cv::line(
+            canvas,
+            cv::Point(resampleArrowX - 5, resampleArrowY + 5),
+            cv::Point(resampleArrowX, resampleArrowY),
+            kMutedTextColor,
+            1,
+            cv::LINE_AA);
+        cv::line(
+            canvas,
+            cv::Point(resampleArrowX, resampleArrowY),
+            cv::Point(resampleArrowX + 5, resampleArrowY + 5),
+            kMutedTextColor,
+            1,
+            cv::LINE_AA);
+    } else {
+        cv::line(
+            canvas,
+            cv::Point(resampleArrowX - 5, resampleArrowY),
+            cv::Point(resampleArrowX, resampleArrowY + 5),
+            kMutedTextColor,
+            1,
+            cv::LINE_AA);
+        cv::line(
+            canvas,
+            cv::Point(resampleArrowX, resampleArrowY + 5),
+            cv::Point(resampleArrowX + 5, resampleArrowY),
+            kMutedTextColor,
+            1,
+            cv::LINE_AA);
+    }
+
+    const int detectionY = y + 264;
     objectDetectionBounds_ = cv::Rect(12, detectionY - 23, kSidebarWidth - 24, 30);
     const cv::Rect boxBounds(18, detectionY - 16, 18, 18);
     cv::rectangle(
@@ -771,7 +899,9 @@ void OpenCvFramePresenter::drawCalibrationButton(cv::Mat& canvas, int y)
             kMutedTextColor);
     }
 
-    drawCalibrationPreview(canvas, detectionY + 100);
+    int previewY = detectionY + 100;
+
+    drawCalibrationPreview(canvas, previewY);
 
     if (detectorDropdownOpen_) {
         const std::array<features::FeatureDetectorType, 3> detectorTypes = {
@@ -833,6 +963,44 @@ void OpenCvFramePresenter::drawCalibrationButton(cv::Mat& canvas, int y)
                 0.52,
                 selected ? kTextColor : kMutedTextColor);
             optionY += kMatcherOptionHeight;
+        }
+    }
+
+    if (resampleDropdownOpen_) {
+        const std::array<double, 9> resampleScales = {
+            0.125,
+            0.250,
+            0.500,
+            0.750,
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+        };
+        int optionY = resampleComboBounds_.y + resampleComboBounds_.height;
+        for (double scale : resampleScales) {
+            const cv::Rect optionBounds(
+                resampleComboBounds_.x,
+                optionY,
+                resampleComboBounds_.width,
+                kResampleOptionHeight);
+            resampleOptionBounds_.push_back({ scale, optionBounds });
+
+            const bool selected = featureMatcher_.calibrationResampleScale() == scale;
+            cv::rectangle(
+                canvas,
+                optionBounds,
+                selected ? cv::Scalar(49, 70, 64) : cv::Scalar(34, 38, 42),
+                cv::FILLED);
+            cv::rectangle(canvas, optionBounds, kPanelBorderColor, 1, cv::LINE_AA);
+            putTextLine(
+                canvas,
+                resampleScaleLabel(scale),
+                cv::Point(optionBounds.x + 12, optionBounds.y + 20),
+                0.52,
+                selected ? kTextColor : kMutedTextColor);
+            optionY += kResampleOptionHeight;
         }
     }
 }
@@ -975,12 +1143,10 @@ void OpenCvFramePresenter::drawObjectMatchOverlay(cv::Mat& image) const
 
     cv::polylines(image, corners, true, cv::Scalar(0, 255, 120), 4, cv::LINE_AA);
 
-    std::ostringstream label;
-    label << "Object found  confidence " << std::fixed << std::setprecision(2)
-          << latestObjectMatch_->confidence;
+    const std::string label = "Object found";
 
     int baseline = 0;
-    const cv::Size textSize = cv::getTextSize(label.str(), cv::FONT_HERSHEY_SIMPLEX, 0.8, 2, &baseline);
+    const cv::Size textSize = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.8, 2, &baseline);
     cv::Point origin = corners.front() + cv::Point(0, -12);
     origin.x = std::clamp(origin.x, 8, std::max(8, image.cols - textSize.width - 8));
     origin.y = std::clamp(origin.y, textSize.height + 8, std::max(textSize.height + 8, image.rows - 8));
@@ -993,7 +1159,7 @@ void OpenCvFramePresenter::drawObjectMatchOverlay(cv::Mat& image) const
     cv::rectangle(image, labelBackground, cv::Scalar(0, 0, 0), cv::FILLED);
     cv::putText(
         image,
-        label.str(),
+        label,
         origin,
         cv::FONT_HERSHEY_SIMPLEX,
         0.8,
@@ -1055,8 +1221,11 @@ void OpenCvFramePresenter::updatePointCloudViewer()
         pointCloudViewer_->initCameraParameters();
         pointCloudViewer_->setCameraPosition(0.0, -1.2, -2.2, 0.0, 0.0, 1.2, 0.0, -1.0, 0.0);
         pointCloudViewer_->setShowFPS(false);
+        pointCloudViewer_->registerKeyboardCallback([this](const pcl::visualization::KeyboardEvent& event) {
+            onPointCloudKeyboard(event);
+        });
         pointCloudViewer_->addText(
-            "Navigate: left-drag rotate | right-drag zoom | middle-drag pan | r reset camera",
+            pointCloudHelpText(),
             12,
             16,
             24,
@@ -1080,6 +1249,65 @@ void OpenCvFramePresenter::updatePointCloudViewer()
     }
 
     spinPointCloudViewer();
+}
+
+void OpenCvFramePresenter::onPointCloudKeyboard(const pcl::visualization::KeyboardEvent& event)
+{
+    if (!event.keyDown()) {
+        return;
+    }
+
+    const std::string& keySymbol = event.getKeySym();
+    const unsigned char keyCode = event.getKeyCode();
+    if (keyCode == '+' || keyCode == '=' || keySymbol == "plus" || keySymbol == "equal" || keySymbol == "KP_Add") {
+        adjustPointCloudPixelStep(1);
+        return;
+    }
+
+    if (keyCode == '-' || keyCode == '_' || keySymbol == "minus" || keySymbol == "underscore"
+        || keySymbol == "KP_Subtract") {
+        adjustPointCloudPixelStep(-1);
+    }
+}
+
+void OpenCvFramePresenter::adjustPointCloudPixelStep(int delta)
+{
+    const int currentPixelStep = pointCloudPixelStep();
+    const int nextPixelStep = std::clamp(
+        currentPixelStep + delta,
+        minimumPointCloudPixelStep(),
+        maximumPointCloudPixelStep());
+    if (nextPixelStep == currentPixelStep) {
+        return;
+    }
+
+    setPointCloudPixelStep(nextPixelStep);
+    updatePointCloudHelpText();
+}
+
+void OpenCvFramePresenter::updatePointCloudHelpText()
+{
+    if (!pointCloudViewer_) {
+        return;
+    }
+
+    pointCloudViewer_->updateText(
+        pointCloudHelpText(),
+        12,
+        16,
+        24,
+        0.86,
+        0.90,
+        0.92,
+        kPointCloudHelpTextId);
+}
+
+std::string OpenCvFramePresenter::pointCloudHelpText() const
+{
+    std::ostringstream text;
+    text << "Navigate: left-drag rotate | right-drag zoom | middle-drag pan | r reset camera"
+         << " | +/- pixel step " << pointCloudPixelStep();
+    return text.str();
 }
 
 void OpenCvFramePresenter::shutdownPointCloudViewer()
@@ -1175,6 +1403,12 @@ bool OpenCvFramePresenter::keepRunning(int delayMs)
                     updatePointCloudViewer();
                 }
             }
+        }
+
+        if (normalizedKey == '+' || normalizedKey == '=') {
+            adjustPointCloudPixelStep(1);
+        } else if (normalizedKey == '-' || normalizedKey == '_') {
+            adjustPointCloudPixelStep(-1);
         }
     }
 

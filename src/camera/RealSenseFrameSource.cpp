@@ -5,6 +5,7 @@
 #include <pcl/filters/voxel_grid.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -19,9 +20,13 @@ namespace {
 
 constexpr unsigned int kFrameWaitTimeoutMs = 500;
 constexpr auto kNoFrameWarningInterval = std::chrono::seconds(3);
-constexpr int kPointCloudPixelStep = 2;
+constexpr int kDefaultPointCloudPixelStep = 2;
+constexpr int kMinimumPointCloudPixelStep = 1;
+constexpr int kMaximumPointCloudPixelStep = 12;
 constexpr float kPointCloudMaxDistanceMeters = 6.0F;
 constexpr float kPointCloudVoxelLeafMeters = 0.025F;
+
+std::atomic<int> gPointCloudPixelStep { kDefaultPointCloudPixelStep };
 
 bool hasFormat(const std::vector<rs2_format>& formats, rs2_format format)
 {
@@ -80,6 +85,26 @@ void setDepthColor(pcl::PointXYZRGB& point, float zMeters)
 }
 
 } // namespace
+
+int pointCloudPixelStep()
+{
+    return gPointCloudPixelStep.load();
+}
+
+int minimumPointCloudPixelStep()
+{
+    return kMinimumPointCloudPixelStep;
+}
+
+int maximumPointCloudPixelStep()
+{
+    return kMaximumPointCloudPixelStep;
+}
+
+void setPointCloudPixelStep(int pixelStep)
+{
+    gPointCloudPixelStep.store(std::clamp(pixelStep, kMinimumPointCloudPixelStep, kMaximumPointCloudPixelStep));
+}
 
 RealSenseFrameSource::RealSenseFrameSource(RealSenseSettings settings)
     : settings_(std::move(settings))
@@ -471,14 +496,15 @@ std::optional<PointCloudFrame> RealSenseFrameSource::convertPointCloudFrame(cons
     const auto intrinsics = videoProfile.get_intrinsics();
     const auto* depthRow = static_cast<const std::uint8_t*>(depth.get_data());
     const float depthUnits = depth.get_units();
+    const int pixelStep = pointCloudPixelStep();
 
     auto rawCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-    rawCloud->points.reserve(static_cast<size_t>((width / kPointCloudPixelStep) * (height / kPointCloudPixelStep)));
+    rawCloud->points.reserve(static_cast<size_t>((width / pixelStep) * (height / pixelStep)));
     rawCloud->is_dense = false;
 
-    for (int y = 0; y < height; y += kPointCloudPixelStep) {
+    for (int y = 0; y < height; y += pixelStep) {
         const auto* row = reinterpret_cast<const std::uint16_t*>(depthRow + (static_cast<size_t>(y) * stride));
-        for (int x = 0; x < width; x += kPointCloudPixelStep) {
+        for (int x = 0; x < width; x += pixelStep) {
             const std::uint16_t rawDepth = row[x];
             if (rawDepth == 0) {
                 continue;
@@ -510,7 +536,7 @@ std::optional<PointCloudFrame> RealSenseFrameSource::convertPointCloudFrame(cons
     }
 
     std::ostringstream details;
-    details << filteredCloud->points.size() << " points  voxel "
+    details << filteredCloud->points.size() << " points  pixel step " << pixelStep << "  voxel "
             << std::fixed << std::setprecision(1) << (kPointCloudVoxelLeafMeters * 100.0F) << "cm";
 
     return PointCloudFrame {

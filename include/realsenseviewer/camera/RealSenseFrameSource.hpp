@@ -11,6 +11,11 @@
 
 namespace rsv {
 
+[[nodiscard]] int pointCloudPixelStep();
+[[nodiscard]] int minimumPointCloudPixelStep();
+[[nodiscard]] int maximumPointCloudPixelStep();
+void setPointCloudPixelStep(int pixelStep);
+
 struct RealSenseSettings {
     std::string serialNumber;
     bool enableMotionStreams = false;
