@@ -27,6 +27,7 @@ constexpr float kPointCloudMaxDistanceMeters = 6.0F;
 constexpr float kPointCloudVoxelLeafMeters = 0.025F;
 
 std::atomic<int> gPointCloudPixelStep { kDefaultPointCloudPixelStep };
+std::atomic<bool> gPointCloudConversionEnabled { false };
 
 bool hasFormat(const std::vector<rs2_format>& formats, rs2_format format)
 {
@@ -106,6 +107,16 @@ void setPointCloudPixelStep(int pixelStep)
     gPointCloudPixelStep.store(std::clamp(pixelStep, kMinimumPointCloudPixelStep, kMaximumPointCloudPixelStep));
 }
 
+bool pointCloudConversionEnabled()
+{
+    return gPointCloudConversionEnabled.load();
+}
+
+void setPointCloudConversionEnabled(bool enabled)
+{
+    gPointCloudConversionEnabled.store(enabled);
+}
+
 RealSenseFrameSource::RealSenseFrameSource(RealSenseSettings settings)
     : settings_(std::move(settings))
     , context_()
@@ -178,8 +189,10 @@ bool RealSenseFrameSource::poll(FrameBundle& output)
 
     FrameBundle bundle;
     for (const rs2::frame& frame : frameset) {
-        if (auto pointCloud = convertPointCloudFrame(frame)) {
-            bundle.pointCloudFrames.push_back(std::move(*pointCloud));
+        if (pointCloudConversionEnabled()) {
+            if (auto pointCloud = convertPointCloudFrame(frame)) {
+                bundle.pointCloudFrames.push_back(std::move(*pointCloud));
+            }
         }
 
         if (auto video = convertVideoFrame(frame)) {
@@ -222,10 +235,14 @@ void RealSenseFrameSource::configureD455DefaultStreams(rs2::config& config) cons
 
     config.enable_stream(RS2_STREAM_DEPTH, 0, 848, 480, RS2_FORMAT_Z16, 30);
     config.enable_stream(RS2_STREAM_COLOR, 0, 1280, 720, RS2_FORMAT_BGR8, 30);
-    config.enable_stream(RS2_STREAM_INFRARED, 1, 848, 480, RS2_FORMAT_Y8, 30);
-    config.enable_stream(RS2_STREAM_INFRARED, 2, 848, 480, RS2_FORMAT_Y8, 30);
 
-    std::cout << "Using D455 default video streams: depth, color, infrared 1, infrared 2\n" << std::flush;
+    std::cout << "Using D455 default video streams: depth, color";
+    if (settings_.enableInfraredStreams) {
+        config.enable_stream(RS2_STREAM_INFRARED, 1, 848, 480, RS2_FORMAT_Y8, 30);
+        config.enable_stream(RS2_STREAM_INFRARED, 2, 848, 480, RS2_FORMAT_Y8, 30);
+        std::cout << ", infrared 1, infrared 2";
+    }
+    std::cout << "\n" << std::flush;
 
     if (settings_.enableMotionStreams) {
         config.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 63);
@@ -249,11 +266,8 @@ void RealSenseFrameSource::configureAutoDetectedStreams(rs2::config& config)
         int height;
         std::vector<rs2_format> formats;
     } videoRequests[] = {
-        {RS2_STREAM_DEPTH, 0, 848, 480, {RS2_FORMAT_Z16}},
-        {RS2_STREAM_COLOR, 0, 1280, 720, {RS2_FORMAT_BGR8, RS2_FORMAT_RGB8, RS2_FORMAT_YUYV}},
-        {RS2_STREAM_INFRARED, 1, 848, 480, {RS2_FORMAT_Y8, RS2_FORMAT_Y16}},
-        {RS2_STREAM_INFRARED, 2, 848, 480, {RS2_FORMAT_Y8, RS2_FORMAT_Y16}},
-        {RS2_STREAM_CONFIDENCE, 0, 848, 480, {RS2_FORMAT_RAW8, RS2_FORMAT_Y8}},
+        {RS2_STREAM_DEPTH, 0, 640, 480, {RS2_FORMAT_Z16}},
+        {RS2_STREAM_COLOR, 0, 640, 480, {RS2_FORMAT_BGR8, RS2_FORMAT_RGB8, RS2_FORMAT_YUYV}},
     };
 
     int enabledStreams = 0;
@@ -290,6 +304,51 @@ void RealSenseFrameSource::configureAutoDetectedStreams(rs2::config& config)
         std::cout << " " << selected->width << "x" << selected->height << " "
                   << formatName(selected->format) << " @" << selected->fps << "fps\n";
         ++enabledStreams;
+    }
+
+    if (settings_.enableInfraredStreams) {
+        const VideoRequest infraredRequests[] = {
+            {RS2_STREAM_INFRARED, 1, 640, 480, {RS2_FORMAT_Y8, RS2_FORMAT_Y16}},
+            {RS2_STREAM_INFRARED, 2, 640, 480, {RS2_FORMAT_Y8, RS2_FORMAT_Y16}},
+            {RS2_STREAM_CONFIDENCE, 0, 640, 480, {RS2_FORMAT_RAW8, RS2_FORMAT_Y8}},
+        };
+
+        for (const auto& request : infraredRequests) {
+            auto selected = selectVideoProfile(
+                device,
+                request.stream,
+                request.index,
+                request.width,
+                request.height,
+                request.formats);
+
+            if (!selected) {
+                std::cout << "Skipping unavailable stream " << streamTypeName(request.stream);
+                if (request.index > 0) {
+                    std::cout << " " << request.index;
+                }
+                std::cout << "\n";
+                continue;
+            }
+
+            config.enable_stream(
+                selected->stream,
+                selected->index,
+                selected->width,
+                selected->height,
+                selected->format,
+                selected->fps);
+
+            std::cout << "Enabled " << streamTypeName(selected->stream);
+            if (selected->index > 0) {
+                std::cout << " " << selected->index;
+            }
+            std::cout << " " << selected->width << "x" << selected->height << " "
+                      << formatName(selected->format) << " @" << selected->fps << "fps\n";
+            ++enabledStreams;
+        }
+    } else {
+        std::cout << "Infrared streams disabled\n";
     }
 
     if (settings_.enableMotionStreams) {

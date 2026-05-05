@@ -16,16 +16,39 @@ endif()
 
 find_package(OpenCV REQUIRED COMPONENTS calib3d core features2d highgui imgcodecs imgproc xfeatures2d)
 find_package(PCL REQUIRED COMPONENTS common filters visualization)
-find_package(realsense2 CONFIG
+find_package(realsense2 CONFIG QUIET
     HINTS
+        "C:/Program Files (x86)/Intel RealSense SDK 2.0/lib/cmake/realsense2"
+        "C:/Program Files/Intel RealSense SDK 2.0/lib/cmake/realsense2"
         /opt/homebrew/opt/librealsense/lib/cmake/realsense2
         /usr/local/opt/librealsense/lib/cmake/realsense2
 )
 
+if(NOT realsense2_FOUND AND WIN32)
+    find_path(realsense2_INCLUDE_DIR
+        NAMES librealsense2/rs.hpp
+        HINTS
+            "C:/Program Files (x86)/Intel RealSense SDK 2.0/include"
+            "C:/Program Files/Intel RealSense SDK 2.0/include"
+    )
+
+    find_library(realsense2_LIBRARY
+        NAMES realsense2
+        HINTS
+            "C:/Program Files (x86)/Intel RealSense SDK 2.0/lib/x64"
+            "C:/Program Files/Intel RealSense SDK 2.0/lib/x64"
+    )
+
+    if(realsense2_INCLUDE_DIR AND realsense2_LIBRARY)
+        set(realsense2_FOUND TRUE)
+    endif()
+endif()
+
 if(NOT realsense2_FOUND)
     message(FATAL_ERROR
         "Intel RealSense SDK 2.0 was not found. Install librealsense2 first, "
-        "for example with `brew install librealsense`, or configure with "
+        "for example with the Intel RealSense SDK 2.0 installer on Windows "
+        "or `brew install librealsense` on macOS, or configure with "
         "-Drealsense2_DIR=/path/to/realsense2Config.cmake."
     )
 endif()
@@ -55,6 +78,10 @@ target_link_libraries(RealsenseViewer
         ${OpenCV_LIBS}
         ${PCL_LIBRARIES}
 )
+
+if(WIN32)
+    target_link_libraries(RealsenseViewer PRIVATE Comdlg32)
+endif()
 
 if(TARGET realsense2::realsense2)
     target_link_libraries(RealsenseViewer PRIVATE realsense2::realsense2)

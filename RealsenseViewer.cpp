@@ -13,11 +13,12 @@ namespace {
 void printUsage(const char* executableName)
 {
     std::cout << "Usage: " << executableName
-              << " [--serial CAMERA_SERIAL] [--motion] [--auto-profiles]\n\n"
+              << " [--serial CAMERA_SERIAL] [--motion] [--auto-profiles] [--no-infrared]\n\n"
               << "Options:\n"
               << "  --serial CAMERA_SERIAL  Open a specific camera\n"
               << "  --motion                Also enable accel/gyro streams\n"
               << "  --auto-profiles         Probe the SDK for every exposed stream profile\n"
+              << "  --no-infrared           Skip infrared streams\n"
               << "  --list-devices          Print devices visible to librealsense and exit\n"
               << "  --no-motion             Keep IMU streams disabled\n\n"
               << "Keys while running:\n"
@@ -63,6 +64,11 @@ int main(int argc, char** argv)
 
         if (argument == "--auto-profiles") {
             settings.useAutoProfileProbe = true;
+            continue;
+        }
+
+        if (argument == "--no-infrared") {
+            settings.enableInfraredStreams = false;
             continue;
         }
 

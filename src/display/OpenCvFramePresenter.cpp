@@ -7,6 +7,14 @@
 #include <pcl/visualization/keyboard_event.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <commdlg.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -44,6 +52,7 @@ constexpr int kMatcherOptionHeight = 28;
 constexpr int kResampleComboHeight = 32;
 constexpr int kResampleOptionHeight = 28;
 constexpr const char* kPointCloudWindowName = "RealSense Point Cloud";
+constexpr const char* kPointCloudStreamName = "Point Cloud";
 constexpr const char* kPointCloudId = "realsense-point-cloud";
 constexpr const char* kPointCloudHelpTextId = "point-cloud-help-text";
 
@@ -133,7 +142,25 @@ std::string basenameOf(const std::string& path)
 
 std::optional<std::string> chooseImageFile()
 {
-#if defined(__APPLE__)
+#if defined(_WIN32)
+    std::array<char, 4096> filename {};
+    OPENFILENAMEA dialog {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.lpstrFile = filename.data();
+    dialog.nMaxFile = static_cast<DWORD>(filename.size());
+    dialog.lpstrTitle = "Choose calibration image";
+    dialog.lpstrFilter =
+        "Image files\0*.bmp;*.dib;*.jpeg;*.jpg;*.jpe;*.jp2;*.png;*.webp;*.pbm;*.pgm;*.ppm;*.pxm;*.pnm;*.tif;*.tiff\0"
+        "All files\0*.*\0";
+    dialog.nFilterIndex = 1;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+
+    if (GetOpenFileNameA(&dialog) == FALSE || filename[0] == '\0') {
+        return std::nullopt;
+    }
+
+    return std::string(filename.data());
+#elif defined(__APPLE__)
     constexpr const char* command =
         "osascript "
         "-e 'set pickedFile to choose file with prompt \"Choose calibration image\"' "
@@ -203,6 +230,12 @@ std::string resampleScaleLabel(double scale)
 }
 
 } // namespace
+
+OpenCvFramePresenter::OpenCvFramePresenter()
+{
+    ensureStreamControl(kPointCloudStreamName, false);
+    setPointCloudConversionEnabled(false);
+}
 
 OpenCvFramePresenter::~OpenCvFramePresenter()
 {
@@ -389,13 +422,32 @@ void OpenCvFramePresenter::onMouse(int event, int x, int y)
         detectorDropdownOpen_ = false;
         matcherDropdownOpen_ = false;
         resampleDropdownOpen_ = false;
-        streamVisibility_[streamName] = !isStreamVisible(streamName);
+        toggleStreamVisibility(streamName);
         if (latestPointCloudFrames_.find(streamName) != latestPointCloudFrames_.end()) {
             updatePointCloudViewer();
         }
         renderDashboard();
         return;
     }
+}
+
+void OpenCvFramePresenter::setStreamVisible(const std::string& name, bool visible)
+{
+    streamVisibility_[name] = visible;
+
+    if (name != kPointCloudStreamName) {
+        return;
+    }
+
+    setPointCloudConversionEnabled(visible);
+    if (!visible) {
+        shutdownPointCloudViewer();
+    }
+}
+
+void OpenCvFramePresenter::toggleStreamVisibility(const std::string& name)
+{
+    setStreamVisible(name, !isStreamVisible(name));
 }
 
 void OpenCvFramePresenter::setFeatureDetectorType(features::FeatureDetectorType detectorType)
@@ -1210,7 +1262,7 @@ void OpenCvFramePresenter::updatePointCloudViewer()
     if (pointCloudViewer_ && pointCloudViewer_->wasStopped()) {
         pointCloudViewer_.reset();
         pointCloudViewerHasCloud_ = false;
-        streamVisibility_[frame->first] = false;
+        setStreamVisible(frame->first, false);
         return;
     }
 
@@ -1336,7 +1388,7 @@ void OpenCvFramePresenter::spinPointCloudViewer()
         pointCloudViewerHasCloud_ = false;
         for (const auto& [name, frame] : latestPointCloudFrames_) {
             (void)frame;
-            streamVisibility_[name] = false;
+            setStreamVisible(name, false);
         }
         return;
     }
@@ -1398,7 +1450,7 @@ bool OpenCvFramePresenter::keepRunning(int delayMs)
         if (normalizedKey >= '1' && normalizedKey <= '9') {
             const auto index = static_cast<size_t>(normalizedKey - '1');
             if (index < streamOrder_.size()) {
-                streamVisibility_[streamOrder_[index]] = !isStreamVisible(streamOrder_[index]);
+                toggleStreamVisibility(streamOrder_[index]);
                 if (latestPointCloudFrames_.find(streamOrder_[index]) != latestPointCloudFrames_.end()) {
                     updatePointCloudViewer();
                 }

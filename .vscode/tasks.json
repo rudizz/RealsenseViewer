@@ -15,6 +15,25 @@
             "options": {
                 "cwd": "${workspaceFolder}"
             },
+            "windows": {
+                "args": [
+                    "-S",
+                    "${workspaceFolder}",
+                    "-B",
+                    "${workspaceFolder}/build/windows",
+                    "-G",
+                    "Visual Studio 17 2022",
+                    "-A",
+                    "x64",
+                    "-DOpenCV_DIR=C:/OpenCV/x64/vc16/lib",
+                    "-DPCL_DIR=C:/Program Files/PCL 1.15.1/cmake",
+                    "-DBoost_DIR=C:/Program Files/PCL 1.15.1/3rdParty/Boost/lib/cmake/Boost-1.87.0",
+                    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+                ],
+                "problemMatcher": [
+                    "$msCompile"
+                ]
+            },
             "problemMatcher": [
                 "$gcc"
             ],
@@ -31,6 +50,17 @@
             "options": {
                 "cwd": "${workspaceFolder}"
             },
+            "windows": {
+                "args": [
+                    "--build",
+                    "${workspaceFolder}/build/windows",
+                    "--config",
+                    "Debug"
+                ],
+                "problemMatcher": [
+                    "$msCompile"
+                ]
+            },
             "dependsOn": [
                 "CMake: configure"
             ],
@@ -42,6 +72,100 @@
                 "isDefault": true
             },
             "detail": "Build RealsenseViewer"
+        },
+        {
+            "label": "CMake: configure Windows",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build/windows",
+                "-G",
+                "Visual Studio 17 2022",
+                "-A",
+                "x64",
+                "-DOpenCV_DIR=C:/OpenCV/x64/vc16/lib",
+                "-DPCL_DIR=C:/Program Files/PCL 1.15.1/cmake",
+                "-DBoost_DIR=C:/Program Files/PCL 1.15.1/3rdParty/Boost/lib/cmake/Boost-1.87.0",
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "C:\\OpenCV\\x64\\vc16\\bin;C:\\Program Files\\PCL 1.15.1\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Boost\\lib;C:\\Program Files\\PCL 1.15.1\\3rdParty\\FLANN\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Qhull\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\VTK\\bin;C:\\Program Files (x86)\\Intel RealSense SDK 2.0\\bin\\x64;C:\\Program Files\\Intel RealSense SDK 2.0\\bin\\x64;${env:PATH}"
+                }
+            },
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "detail": "Configure RealsenseViewer for Windows with Visual Studio 2022"
+        },
+        {
+            "label": "CMake: build Windows",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build/windows",
+                "--config",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "C:\\OpenCV\\x64\\vc16\\bin;C:\\Program Files\\PCL 1.15.1\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Boost\\lib;C:\\Program Files\\PCL 1.15.1\\3rdParty\\FLANN\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Qhull\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\VTK\\bin;C:\\Program Files (x86)\\Intel RealSense SDK 2.0\\bin\\x64;C:\\Program Files\\Intel RealSense SDK 2.0\\bin\\x64;${env:PATH}"
+                }
+            },
+            "dependsOn": [
+                "CMake: configure Windows"
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "detail": "Build RealsenseViewer on Windows"
+        },
+        {
+            "label": "Run: viewer Windows",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/windows/Debug/RealsenseViewer.exe",
+            "args": [
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [
+                "CMake: build Windows"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "detail": "Run RealsenseViewer on Windows"
+        },
+        {
+            "label": "Run: list devices Windows",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/windows/Debug/RealsenseViewer.exe",
+            "args": [
+                "--list-devices"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [
+                "CMake: build Windows"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "detail": "List RealSense devices on Windows"
         },
         {
             "label": "Run: viewer with sudo",

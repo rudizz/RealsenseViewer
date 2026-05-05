@@ -15,11 +15,14 @@ namespace rsv {
 [[nodiscard]] int minimumPointCloudPixelStep();
 [[nodiscard]] int maximumPointCloudPixelStep();
 void setPointCloudPixelStep(int pixelStep);
+[[nodiscard]] bool pointCloudConversionEnabled();
+void setPointCloudConversionEnabled(bool enabled);
 
 struct RealSenseSettings {
     std::string serialNumber;
     bool enableMotionStreams = false;
     bool useAutoProfileProbe = false;
+    bool enableInfraredStreams = true;
 };
 
 class RealSenseFrameSource final : public IFrameSource {

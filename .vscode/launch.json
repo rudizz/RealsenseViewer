@@ -5,6 +5,43 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "(Windows) Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/windows/Debug/RealsenseViewer.exe",
+            "args": [
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "PATH",
+                    "value": "C:\\OpenCV\\x64\\vc16\\bin;C:\\Program Files\\PCL 1.15.1\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Boost\\lib;C:\\Program Files\\PCL 1.15.1\\3rdParty\\FLANN\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Qhull\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\VTK\\bin;C:\\Program Files (x86)\\Intel RealSense SDK 2.0\\bin\\x64;C:\\Program Files\\Intel RealSense SDK 2.0\\bin\\x64;${env:PATH}"
+                }
+            ],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake: build Windows"
+        },
+        {
+            "name": "(Windows) List RealSense devices",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/windows/Debug/RealsenseViewer.exe",
+            "args": [
+                "--list-devices"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "PATH",
+                    "value": "C:\\OpenCV\\x64\\vc16\\bin;C:\\Program Files\\PCL 1.15.1\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Boost\\lib;C:\\Program Files\\PCL 1.15.1\\3rdParty\\FLANN\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\Qhull\\bin;C:\\Program Files\\PCL 1.15.1\\3rdParty\\VTK\\bin;C:\\Program Files (x86)\\Intel RealSense SDK 2.0\\bin\\x64;C:\\Program Files\\Intel RealSense SDK 2.0\\bin\\x64;${env:PATH}"
+                }
+            ],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake: build Windows"
+        },
+        {
             "name": "(lldb) Launch",
             "type": "cppdbg",
             "request": "launch",

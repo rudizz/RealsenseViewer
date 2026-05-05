@@ -26,6 +26,14 @@ On macOS with Homebrew, the usual setup is:
 brew install cmake opencv pcl librealsense
 ```
 
+On Windows, install:
+
+- Visual Studio 2022 with the Desktop development with C++ workload
+- CMake 3.22+
+- OpenCV with CMake config files, expected by the VS Code task at `C:\OpenCV\x64\vc16\lib`
+- PCL with `PCLConfig.cmake` available through `PCL_DIR` or `CMAKE_PREFIX_PATH`
+- Intel RealSense SDK 2.0
+
 ## Build
 
 ```sh
@@ -57,6 +65,15 @@ sudo ./build/RealsenseViewer --serial 053122251294
 ```
 
 In VS Code, use `Terminal > Run Task... > Run: viewer with sudo`.
+
+On Windows, use:
+
+```text
+Terminal > Run Task... > Run: viewer Windows
+```
+
+For debugging, select `(Windows) Launch` in the Run and Debug panel. The
+Windows configuration builds into `build/windows/Debug/RealsenseViewer.exe`.
 
 ## Debug With Sudo
 

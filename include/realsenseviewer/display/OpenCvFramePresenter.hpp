@@ -25,6 +25,7 @@ struct PclVisualizerDeleter {
 
 class OpenCvFramePresenter final : public IFramePresenter {
 public:
+    OpenCvFramePresenter();
     ~OpenCvFramePresenter() override;
 
     bool present(const FrameBundle& bundle) override;
@@ -35,6 +36,8 @@ private:
 
     void setupWindow();
     void onMouse(int event, int x, int y);
+    void setStreamVisible(const std::string& name, bool visible);
+    void toggleStreamVisibility(const std::string& name);
     void openCalibrationImage();
     void setFeatureDetectorType(features::FeatureDetectorType detectorType);
     void setFeatureMatcherType(features::FeatureMatcherType matcherType);

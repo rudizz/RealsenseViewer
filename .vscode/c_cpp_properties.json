@@ -1,6 +1,30 @@
 {
     "configurations": [
         {
+            "name": "Windows",
+            "includePath": [
+                "${workspaceFolder}/include",
+                "${env:OPENCV_DIR}/include",
+                "C:/OpenCV/include",
+                "C:/Program Files/PCL 1.15.1/include/pcl-1.15",
+                "C:/Program Files/PCL 1.15.1/3rdParty/Eigen3/include/eigen3",
+                "C:/Program Files (x86)/Intel RealSense SDK 2.0/include",
+                "C:/Program Files/Intel RealSense SDK 2.0/include",
+                "C:/Program Files/PCL*/include/**"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "windowsSdkVersion": "10.0",
+            "compilerPath": "cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64",
+            "configurationProvider": "ms-vscode.cmake-tools"
+        },
+        {
             "name": "macOS",
             "includePath": [
                 "${workspaceFolder}/include",
