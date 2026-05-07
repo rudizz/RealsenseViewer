@@ -1,22 +1,21 @@
 #pragma once
 
 #include "realsenseviewer/camera/IFrameSource.hpp"
+#include "realsenseviewer/camera/RealSenseFrameProcessor.hpp"
+#include "realsenseviewer/concurrency/BoundedQueue.hpp"
 
 #include <librealsense2/rs.hpp>
 
+#include <atomic>
 #include <chrono>
+#include <exception>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace rsv {
-
-[[nodiscard]] int pointCloudPixelStep();
-[[nodiscard]] int minimumPointCloudPixelStep();
-[[nodiscard]] int maximumPointCloudPixelStep();
-void setPointCloudPixelStep(int pixelStep);
-[[nodiscard]] bool pointCloudConversionEnabled();
-void setPointCloudConversionEnabled(bool enabled);
 
 struct RealSenseSettings {
     std::string serialNumber;
@@ -66,16 +65,23 @@ private:
     [[nodiscard]] std::optional<MotionProfileChoice> selectMotionProfile(
         const rs2::device& device,
         rs2_stream stream) const;
-    [[nodiscard]] std::optional<VideoFrame> convertVideoFrame(const rs2::frame& frame) const;
-    [[nodiscard]] std::optional<PointCloudFrame> convertPointCloudFrame(const rs2::frame& frame) const;
-    [[nodiscard]] std::optional<MotionSample> convertMotionFrame(const rs2::frame& frame) const;
-    [[nodiscard]] std::string frameName(const rs2::frame& frame) const;
+    void captureLoop() noexcept;
+    void processingLoop() noexcept;
+    void recordWorkerException(std::exception_ptr exception) noexcept;
+    void rethrowWorkerExceptionIfAny();
 
     RealSenseSettings settings_;
     rs2::context context_;
     rs2::pipeline pipeline_;
+    RealSenseFrameProcessor processor_;
+    BoundedQueue<rs2::frameset> capturedFrames_;
+    BoundedQueue<FrameBundle> processedFrames_;
+    std::thread captureThread_;
+    std::thread processingThread_;
+    std::mutex workerExceptionMutex_;
+    std::exception_ptr workerException_;
     std::chrono::steady_clock::time_point nextNoFrameWarning_;
-    bool running_ = false;
+    std::atomic<bool> running_ { false };
 };
 
 } // namespace rsv

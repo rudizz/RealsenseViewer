@@ -137,7 +137,10 @@ unplug/replug the camera, and rerun the SDK tools from Terminal.
 ## Architecture
 
 - `IFrameSource` is the camera abstraction.
-- `RealSenseFrameSource` implements `IFrameSource` with librealsense.
+- `RealSenseFrameSource` implements `IFrameSource` with librealsense and owns the capture/processing worker lifecycle.
+- The capture worker waits for RealSense SDK frames and writes raw framesets into a bounded FIFO.
+- `RealSenseFrameProcessor` converts raw RealSense framesets into display-ready video, motion, and point-cloud bundles on a separate worker thread.
+- `BoundedQueue` is the FIFO abstraction; when a queue is full, the newest frame is dropped to keep latency bounded.
 - `IFramePresenter` is the display abstraction.
 - `OpenCvFramePresenter` implements `IFramePresenter` with an OpenCV dashboard.
 - `Application` owns the run loop and only depends on the interfaces.

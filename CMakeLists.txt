@@ -57,6 +57,7 @@ add_executable(RealsenseViewer
     RealsenseViewer.cpp
     src/Application.cpp
     src/camera/RealSenseDiagnostics.cpp
+    src/camera/RealSenseFrameProcessor.cpp
     src/camera/RealSenseFrameSource.cpp
     src/display/OpenCvFramePresenter.cpp
     src/features/ObjectFeatureMatcher.cpp

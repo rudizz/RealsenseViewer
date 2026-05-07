@@ -46,7 +46,7 @@ public:
     [[nodiscard]] int calibrationKeypointCount() const;
 
 private:
-    void configureDetector(FeatureDetectorType detectorType);
+    bool configureDetector(FeatureDetectorType detectorType);
     void clearCalibration();
     void matchDescriptors(const cv::Mat& sceneDescriptors, std::vector<std::vector<cv::DMatch>>& knnMatches) const;
     [[nodiscard]] int descriptorMatcherNorm() const;

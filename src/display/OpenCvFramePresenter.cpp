@@ -1,6 +1,6 @@
 #include "realsenseviewer/display/OpenCvFramePresenter.hpp"
 
-#include "realsenseviewer/camera/RealSenseFrameSource.hpp"
+#include "realsenseviewer/camera/PointCloudSettings.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -456,16 +456,23 @@ void OpenCvFramePresenter::setFeatureDetectorType(features::FeatureDetectorType 
         return;
     }
 
-    latestObjectMatch_.reset();
     const bool calibrationReloaded = featureMatcher_.setDetectorType(detectorType);
     if (!calibrationReloaded) {
-        calibrationImageLabel_.clear();
         latestFeatureMatchMs_.reset();
+        if (featureMatcher_.detectorType() != detectorType) {
+            featureMatchStatus_ = std::string(detectorTypeLabel(detectorType))
+                + " unavailable in this OpenCV build";
+            return;
+        }
+
+        latestObjectMatch_.reset();
+        calibrationImageLabel_.clear();
         featureMatchStatus_ = std::string(featureMatcher_.detectorName())
             + " selected; could not extract enough features";
         return;
     }
 
+    latestObjectMatch_.reset();
     if (!featureMatcher_.hasCalibration()) {
         latestFeatureMatchMs_.reset();
         featureMatchStatus_ = std::string(featureMatcher_.detectorName()) + " selected";

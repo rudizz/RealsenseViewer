@@ -54,7 +54,10 @@ bool ObjectFeatureMatcher::setDetectorType(FeatureDetectorType detectorType)
     }
 
     const std::string previousCalibrationImagePath = calibrationImagePath_;
-    configureDetector(detectorType);
+    if (!configureDetector(detectorType)) {
+        return false;
+    }
+
     if (previousCalibrationImagePath.empty()) {
         clearCalibration();
         return true;
@@ -88,37 +91,42 @@ bool ObjectFeatureMatcher::loadCalibrationImage(const std::string& imagePath)
 {
     clearCalibration();
 
-    cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);
-    if (image.empty()) {
+    try {
+        cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);
+        if (image.empty()) {
+            return false;
+        }
+
+        if (calibrationResampleScale_ != 1.0) {
+            const cv::Size targetSize(
+                std::max(1, static_cast<int>(std::round(image.cols * calibrationResampleScale_))),
+                std::max(1, static_cast<int>(std::round(image.rows * calibrationResampleScale_))));
+            cv::resize(image, image, targetSize, 0.0, 0.0, cv::INTER_LINEAR);
+        }
+
+        std::vector<cv::KeyPoint> keypoints;
+        cv::Mat descriptors;
+        detector_->detectAndCompute(toGray(image), cv::noArray(), keypoints, descriptors);
+
+        if (descriptors.empty() || static_cast<int>(keypoints.size()) < kMinimumCalibrationKeypoints) {
+            return false;
+        }
+
+        calibrationImagePath_ = imagePath;
+        calibrationImageSize_ = image.size();
+        calibrationKeypoints_ = std::move(keypoints);
+        calibrationDescriptors_ = std::move(descriptors);
+        cv::drawKeypoints(
+            image,
+            calibrationKeypoints_,
+            calibrationFeatureImage_,
+            cv::Scalar(0, 255, 120),
+            cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+        return true;
+    } catch (const cv::Exception&) {
+        clearCalibration();
         return false;
     }
-
-    if (calibrationResampleScale_ != 1.0) {
-        const cv::Size targetSize(
-            std::max(1, static_cast<int>(std::round(image.cols * calibrationResampleScale_))),
-            std::max(1, static_cast<int>(std::round(image.rows * calibrationResampleScale_))));
-        cv::resize(image, image, targetSize, 0.0, 0.0, cv::INTER_LINEAR);
-    }
-
-    std::vector<cv::KeyPoint> keypoints;
-    cv::Mat descriptors;
-    detector_->detectAndCompute(toGray(image), cv::noArray(), keypoints, descriptors);
-
-    if (descriptors.empty() || static_cast<int>(keypoints.size()) < kMinimumCalibrationKeypoints) {
-        return false;
-    }
-
-    calibrationImagePath_ = imagePath;
-    calibrationImageSize_ = image.size();
-    calibrationKeypoints_ = std::move(keypoints);
-    calibrationDescriptors_ = std::move(descriptors);
-    cv::drawKeypoints(
-        image,
-        calibrationKeypoints_,
-        calibrationFeatureImage_,
-        cv::Scalar(0, 255, 120),
-        cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    return true;
 }
 
 std::optional<MatchResult> ObjectFeatureMatcher::match(const cv::Mat& colorImage) const
@@ -263,20 +271,32 @@ int ObjectFeatureMatcher::calibrationKeypointCount() const
     return static_cast<int>(calibrationKeypoints_.size());
 }
 
-void ObjectFeatureMatcher::configureDetector(FeatureDetectorType detectorType)
+bool ObjectFeatureMatcher::configureDetector(FeatureDetectorType detectorType)
 {
-    detectorType_ = detectorType;
-    switch (detectorType_) {
-    case FeatureDetectorType::Sift:
-        detector_ = cv::SIFT::create(1600);
-        break;
-    case FeatureDetectorType::Orb:
-        detector_ = cv::ORB::create(1600);
-        break;
-    case FeatureDetectorType::Surf:
-        detector_ = cv::xfeatures2d::SURF::create(400.0);
-        break;
+    cv::Ptr<cv::Feature2D> detector;
+    try {
+        switch (detectorType) {
+        case FeatureDetectorType::Sift:
+            detector = cv::SIFT::create(1600);
+            break;
+        case FeatureDetectorType::Orb:
+            detector = cv::ORB::create(1600);
+            break;
+        case FeatureDetectorType::Surf:
+            detector = cv::xfeatures2d::SURF::create(400.0);
+            break;
+        }
+    } catch (const cv::Exception&) {
+        return false;
     }
+
+    if (!detector) {
+        return false;
+    }
+
+    detector_ = std::move(detector);
+    detectorType_ = detectorType;
+    return true;
 }
 
 void ObjectFeatureMatcher::clearCalibration()

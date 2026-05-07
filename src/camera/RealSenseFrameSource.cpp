@@ -1,15 +1,10 @@
 #include "realsenseviewer/camera/RealSenseDiagnostics.hpp"
 #include "realsenseviewer/camera/RealSenseFrameSource.hpp"
 
-#include <opencv2/imgproc.hpp>
-#include <pcl/filters/voxel_grid.h>
-
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstdint>
-#include <iomanip>
+#include <cstddef>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -20,14 +15,9 @@ namespace {
 
 constexpr unsigned int kFrameWaitTimeoutMs = 500;
 constexpr auto kNoFrameWarningInterval = std::chrono::seconds(3);
-constexpr int kDefaultPointCloudPixelStep = 2;
-constexpr int kMinimumPointCloudPixelStep = 1;
-constexpr int kMaximumPointCloudPixelStep = 12;
-constexpr float kPointCloudMaxDistanceMeters = 6.0F;
-constexpr float kPointCloudVoxelLeafMeters = 0.025F;
-
-std::atomic<int> gPointCloudPixelStep { kDefaultPointCloudPixelStep };
-std::atomic<bool> gPointCloudConversionEnabled { false };
+constexpr auto kQueueFullWarningInterval = std::chrono::seconds(3);
+constexpr std::size_t kCapturedFrameQueueCapacity = 3;
+constexpr std::size_t kProcessedFrameQueueCapacity = 2;
 
 bool hasFormat(const std::vector<rs2_format>& formats, rs2_format format)
 {
@@ -76,51 +66,14 @@ std::string serialNumberOf(const rs2::device& device)
     return device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
 }
 
-void setDepthColor(pcl::PointXYZRGB& point, float zMeters)
-{
-    const float normalized = std::clamp(zMeters / kPointCloudMaxDistanceMeters, 0.0F, 1.0F);
-
-    point.r = static_cast<std::uint8_t>(255.0F * normalized);
-    point.g = static_cast<std::uint8_t>(255.0F * (1.0F - std::abs((normalized * 2.0F) - 1.0F)));
-    point.b = static_cast<std::uint8_t>(255.0F * (1.0F - normalized));
-}
-
 } // namespace
-
-int pointCloudPixelStep()
-{
-    return gPointCloudPixelStep.load();
-}
-
-int minimumPointCloudPixelStep()
-{
-    return kMinimumPointCloudPixelStep;
-}
-
-int maximumPointCloudPixelStep()
-{
-    return kMaximumPointCloudPixelStep;
-}
-
-void setPointCloudPixelStep(int pixelStep)
-{
-    gPointCloudPixelStep.store(std::clamp(pixelStep, kMinimumPointCloudPixelStep, kMaximumPointCloudPixelStep));
-}
-
-bool pointCloudConversionEnabled()
-{
-    return gPointCloudConversionEnabled.load();
-}
-
-void setPointCloudConversionEnabled(bool enabled)
-{
-    gPointCloudConversionEnabled.store(enabled);
-}
 
 RealSenseFrameSource::RealSenseFrameSource(RealSenseSettings settings)
     : settings_(std::move(settings))
     , context_()
     , pipeline_(context_)
+    , capturedFrames_(kCapturedFrameQueueCapacity)
+    , processedFrames_(kProcessedFrameQueueCapacity)
 {
 }
 
@@ -131,7 +84,7 @@ RealSenseFrameSource::~RealSenseFrameSource()
 
 void RealSenseFrameSource::start()
 {
-    if (running_) {
+    if (running_.load()) {
         return;
     }
 
@@ -140,8 +93,17 @@ void RealSenseFrameSource::start()
 
     try {
         pipeline_.start(config);
-        running_ = true;
+        capturedFrames_.reset();
+        processedFrames_.reset();
+        {
+            std::lock_guard<std::mutex> lock(workerExceptionMutex_);
+            workerException_ = nullptr;
+        }
+
+        running_.store(true);
         nextNoFrameWarning_ = std::chrono::steady_clock::now() + kNoFrameWarningInterval;
+        processingThread_ = std::thread(&RealSenseFrameSource::processingLoop, this);
+        captureThread_ = std::thread(&RealSenseFrameSource::captureLoop, this);
         std::cout << "RealSense pipeline started. Press q or Esc in the OpenCV dashboard to quit.\n";
     } catch (const rs2::error& error) {
         std::ostringstream message;
@@ -150,14 +112,19 @@ void RealSenseFrameSource::start()
                 << error.get_failed_args() << ")\n"
                 << describeRealSenseDevices();
         throw std::runtime_error(message.str());
+    } catch (...) {
+        stop();
+        throw;
     }
 }
 
 void RealSenseFrameSource::stop() noexcept
 {
-    if (!running_) {
+    if (!running_.exchange(false)) {
         return;
     }
+
+    capturedFrames_.close();
 
     try {
         pipeline_.stop();
@@ -165,56 +132,123 @@ void RealSenseFrameSource::stop() noexcept
         std::cerr << "Could not stop RealSense pipeline cleanly: " << error.what() << "\n";
     }
 
-    running_ = false;
+    if (captureThread_.joinable()) {
+        captureThread_.join();
+    }
+
+    capturedFrames_.close();
+
+    if (processingThread_.joinable()) {
+        processingThread_.join();
+    }
+
+    processedFrames_.close();
 }
 
 bool RealSenseFrameSource::poll(FrameBundle& output)
 {
-    if (!running_) {
+    rethrowWorkerExceptionIfAny();
+
+    if (!running_.load()) {
         return false;
     }
 
-    rs2::frameset frameset;
-    if (!pipeline_.try_wait_for_frames(&frameset, kFrameWaitTimeoutMs)) {
-        std::cerr << "RealSense frame wait timed out after " << kFrameWaitTimeoutMs << " ms.\n";
+    return processedFrames_.tryPop(output) && !output.empty();
+}
 
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= nextNoFrameWarning_) {
-            std::cerr << "Still waiting for RealSense frames from the active pipeline...\n";
-            nextNoFrameWarning_ = now + kNoFrameWarningInterval;
-        }
+void RealSenseFrameSource::captureLoop() noexcept
+{
+    auto nextQueueFullWarning = std::chrono::steady_clock::now();
 
-        return false;
-    }
+    try {
+        while (running_.load()) {
+            rs2::frameset frameset;
+            if (!pipeline_.try_wait_for_frames(&frameset, kFrameWaitTimeoutMs)) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= nextNoFrameWarning_) {
+                    std::cerr << "Still waiting for RealSense frames from the active pipeline...\n";
+                    nextNoFrameWarning_ = now + kNoFrameWarningInterval;
+                }
 
-    FrameBundle bundle;
-    for (const rs2::frame& frame : frameset) {
-        if (pointCloudConversionEnabled()) {
-            if (auto pointCloud = convertPointCloudFrame(frame)) {
-                bundle.pointCloudFrames.push_back(std::move(*pointCloud));
+                continue;
+            }
+
+            if (capturedFrames_.tryPush(std::move(frameset))) {
+                continue;
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextQueueFullWarning) {
+                std::cerr << "Dropping RealSense frames because the capture FIFO is full.\n";
+                nextQueueFullWarning = now + kQueueFullWarningInterval;
             }
         }
-
-        if (auto video = convertVideoFrame(frame)) {
-            bundle.videoFrames.push_back(std::move(*video));
-            continue;
-        }
-
-        if (auto motion = convertMotionFrame(frame)) {
-            bundle.motionSamples.push_back(std::move(*motion));
+    } catch (...) {
+        if (running_.load()) {
+            recordWorkerException(std::current_exception());
         }
     }
 
-    if (bundle.empty()) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= nextNoFrameWarning_) {
-            std::cerr << "RealSense delivered frames, but none used a displayable video or motion format.\n";
-            nextNoFrameWarning_ = now + kNoFrameWarningInterval;
+    capturedFrames_.close();
+}
+
+void RealSenseFrameSource::processingLoop() noexcept
+{
+    auto nextNoDisplayableWarning = std::chrono::steady_clock::now() + kNoFrameWarningInterval;
+    auto nextQueueFullWarning = std::chrono::steady_clock::now();
+
+    try {
+        rs2::frameset frameset;
+        while (capturedFrames_.waitPop(frameset)) {
+            FrameBundle bundle = processor_.process(frameset);
+            if (bundle.empty()) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= nextNoDisplayableWarning) {
+                    std::cerr << "RealSense delivered frames, but none used a displayable video or motion format.\n";
+                    nextNoDisplayableWarning = now + kNoFrameWarningInterval;
+                }
+                continue;
+            }
+
+            if (processedFrames_.tryPush(std::move(bundle))) {
+                continue;
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextQueueFullWarning) {
+                std::cerr << "Dropping processed RealSense frames because the presentation FIFO is full.\n";
+                nextQueueFullWarning = now + kQueueFullWarningInterval;
+            }
+        }
+    } catch (...) {
+        if (running_.load()) {
+            recordWorkerException(std::current_exception());
         }
     }
 
-    output = std::move(bundle);
-    return !output.empty();
+    processedFrames_.close();
+}
+
+void RealSenseFrameSource::recordWorkerException(std::exception_ptr exception) noexcept
+{
+    std::lock_guard<std::mutex> lock(workerExceptionMutex_);
+    if (!workerException_) {
+        workerException_ = exception;
+    }
+}
+
+void RealSenseFrameSource::rethrowWorkerExceptionIfAny()
+{
+    std::exception_ptr exception;
+    {
+        std::lock_guard<std::mutex> lock(workerExceptionMutex_);
+        exception = workerException_;
+        workerException_ = nullptr;
+    }
+
+    if (exception) {
+        std::rethrow_exception(exception);
+    }
 }
 
 void RealSenseFrameSource::configureStreams(rs2::config& config)
@@ -461,180 +495,6 @@ std::optional<RealSenseFrameSource::MotionProfileChoice> RealSenseFrameSource::s
     }
 
     return best;
-}
-
-std::optional<VideoFrame> RealSenseFrameSource::convertVideoFrame(const rs2::frame& frame) const
-{
-    const auto video = frame.as<rs2::video_frame>();
-    if (!video) {
-        return std::nullopt;
-    }
-
-    const int width = video.get_width();
-    const int height = video.get_height();
-    const auto stride = static_cast<size_t>(video.get_stride_in_bytes());
-    const auto format = video.get_profile().format();
-    cv::Mat bgrImage;
-
-    switch (format) {
-    case RS2_FORMAT_BGR8: {
-        bgrImage = cv::Mat(height, width, CV_8UC3, const_cast<void*>(video.get_data()), stride).clone();
-        break;
-    }
-    case RS2_FORMAT_RGB8: {
-        const cv::Mat rgb(height, width, CV_8UC3, const_cast<void*>(video.get_data()), stride);
-        cv::cvtColor(rgb, bgrImage, cv::COLOR_RGB2BGR);
-        break;
-    }
-    case RS2_FORMAT_RGBA8: {
-        const cv::Mat rgba(height, width, CV_8UC4, const_cast<void*>(video.get_data()), stride);
-        cv::cvtColor(rgba, bgrImage, cv::COLOR_RGBA2BGR);
-        break;
-    }
-    case RS2_FORMAT_BGRA8: {
-        const cv::Mat bgra(height, width, CV_8UC4, const_cast<void*>(video.get_data()), stride);
-        cv::cvtColor(bgra, bgrImage, cv::COLOR_BGRA2BGR);
-        break;
-    }
-    case RS2_FORMAT_YUYV: {
-        const cv::Mat yuyv(height, width, CV_8UC2, const_cast<void*>(video.get_data()), stride);
-        cv::cvtColor(yuyv, bgrImage, cv::COLOR_YUV2BGR_YUY2);
-        break;
-    }
-    case RS2_FORMAT_Y8:
-    case RS2_FORMAT_RAW8: {
-        const cv::Mat gray(height, width, CV_8UC1, const_cast<void*>(video.get_data()), stride);
-        cv::cvtColor(gray, bgrImage, cv::COLOR_GRAY2BGR);
-        break;
-    }
-    case RS2_FORMAT_Y16: {
-        const cv::Mat gray16(height, width, CV_16UC1, const_cast<void*>(video.get_data()), stride);
-        cv::Mat gray8;
-        cv::normalize(gray16, gray8, 0, 255, cv::NORM_MINMAX, CV_8UC1);
-        cv::cvtColor(gray8, bgrImage, cv::COLOR_GRAY2BGR);
-        break;
-    }
-    case RS2_FORMAT_Z16: {
-        const cv::Mat depth16(height, width, CV_16UC1, const_cast<void*>(video.get_data()), stride);
-        cv::Mat depth8;
-        depth16.convertTo(depth8, CV_8UC1, 255.0 / 6000.0);
-        cv::applyColorMap(depth8, bgrImage, cv::COLORMAP_TURBO);
-        break;
-    }
-    default:
-        return std::nullopt;
-    }
-
-    std::ostringstream details;
-    details << width << "x" << height << " " << formatName(format) << " "
-            << video.get_profile().fps() << "fps";
-
-    return VideoFrame {
-        frameName(frame),
-        details.str(),
-        std::move(bgrImage),
-        frame.get_timestamp(),
-    };
-}
-
-std::optional<PointCloudFrame> RealSenseFrameSource::convertPointCloudFrame(const rs2::frame& frame) const
-{
-    const auto depth = frame.as<rs2::depth_frame>();
-    if (!depth || depth.get_profile().format() != RS2_FORMAT_Z16) {
-        return std::nullopt;
-    }
-
-    const auto videoProfile = depth.get_profile().as<rs2::video_stream_profile>();
-    if (!videoProfile) {
-        return std::nullopt;
-    }
-
-    const int width = depth.get_width();
-    const int height = depth.get_height();
-    const auto stride = static_cast<size_t>(depth.get_stride_in_bytes());
-    const auto intrinsics = videoProfile.get_intrinsics();
-    const auto* depthRow = static_cast<const std::uint8_t*>(depth.get_data());
-    const float depthUnits = depth.get_units();
-    const int pixelStep = pointCloudPixelStep();
-
-    auto rawCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-    rawCloud->points.reserve(static_cast<size_t>((width / pixelStep) * (height / pixelStep)));
-    rawCloud->is_dense = false;
-
-    for (int y = 0; y < height; y += pixelStep) {
-        const auto* row = reinterpret_cast<const std::uint16_t*>(depthRow + (static_cast<size_t>(y) * stride));
-        for (int x = 0; x < width; x += pixelStep) {
-            const std::uint16_t rawDepth = row[x];
-            if (rawDepth == 0) {
-                continue;
-            }
-
-            const float zMeters = static_cast<float>(rawDepth) * depthUnits;
-            if (zMeters <= 0.0F || zMeters > kPointCloudMaxDistanceMeters) {
-                continue;
-            }
-
-            pcl::PointXYZRGB point;
-            point.x = ((static_cast<float>(x) - intrinsics.ppx) / intrinsics.fx) * zMeters;
-            point.y = ((static_cast<float>(y) - intrinsics.ppy) / intrinsics.fy) * zMeters;
-            point.z = zMeters;
-            setDepthColor(point, zMeters);
-            rawCloud->points.push_back(point);
-        }
-    }
-
-    rawCloud->width = static_cast<std::uint32_t>(rawCloud->points.size());
-    rawCloud->height = 1;
-
-    auto filteredCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-    if (!rawCloud->points.empty()) {
-        pcl::VoxelGrid<pcl::PointXYZRGB> voxelGrid;
-        voxelGrid.setInputCloud(rawCloud);
-        voxelGrid.setLeafSize(kPointCloudVoxelLeafMeters, kPointCloudVoxelLeafMeters, kPointCloudVoxelLeafMeters);
-        voxelGrid.filter(*filteredCloud);
-    }
-
-    std::ostringstream details;
-    details << filteredCloud->points.size() << " points  pixel step " << pixelStep << "  voxel "
-            << std::fixed << std::setprecision(1) << (kPointCloudVoxelLeafMeters * 100.0F) << "cm";
-
-    return PointCloudFrame {
-        "Point Cloud",
-        details.str(),
-        std::move(filteredCloud),
-        frame.get_timestamp(),
-    };
-}
-
-std::optional<MotionSample> RealSenseFrameSource::convertMotionFrame(const rs2::frame& frame) const
-{
-    const auto motion = frame.as<rs2::motion_frame>();
-    if (!motion) {
-        return std::nullopt;
-    }
-
-    const rs2_vector data = motion.get_motion_data();
-    const rs2_stream stream = motion.get_profile().stream_type();
-
-    return MotionSample {
-        frameName(frame),
-        stream == RS2_STREAM_ACCEL ? "m/s^2" : "rad/s",
-        cv::Vec3f(data.x, data.y, data.z),
-        frame.get_timestamp(),
-    };
-}
-
-std::string RealSenseFrameSource::frameName(const rs2::frame& frame) const
-{
-    const rs2::stream_profile profile = frame.get_profile();
-    std::ostringstream name;
-    name << profile.stream_name();
-
-    if (profile.stream_index() > 0) {
-        name << " " << profile.stream_index();
-    }
-
-    return name.str();
 }
 
 } // namespace rsv
