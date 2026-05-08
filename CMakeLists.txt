@@ -84,6 +84,10 @@ if(WIN32)
     target_link_libraries(RealsenseViewer PRIVATE Comdlg32)
 endif()
 
+if(APPLE)
+    target_link_libraries(RealsenseViewer PRIVATE "-framework ApplicationServices")
+endif()
+
 if(TARGET realsense2::realsense2)
     target_link_libraries(RealsenseViewer PRIVATE realsense2::realsense2)
 elseif(TARGET realsense2)

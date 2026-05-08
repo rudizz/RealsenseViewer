@@ -10,18 +10,18 @@
 namespace rsv {
 
 template <typename T>
-class BoundedQueue {
+class ConcurrentQueue {
 public:
-    explicit BoundedQueue(std::size_t capacity)
+    explicit ConcurrentQueue(std::size_t capacity)
         : capacity_(capacity)
     {
         if (capacity_ == 0) {
-            throw std::invalid_argument("BoundedQueue capacity must be greater than zero");
+            throw std::invalid_argument("ConcurrentQueue capacity must be greater than zero");
         }
     }
 
-    BoundedQueue(const BoundedQueue&) = delete;
-    BoundedQueue& operator=(const BoundedQueue&) = delete;
+    ConcurrentQueue(const ConcurrentQueue&) = delete;
+    ConcurrentQueue& operator=(const ConcurrentQueue&) = delete;
 
     bool tryPush(T item)
     {
@@ -53,18 +53,14 @@ public:
 
     bool waitPop(T& output)
     {
+        {
         std::unique_lock<std::mutex> lock(mutex_);
         available_.wait(lock, [this] {
             return closed_ || !queue_.empty();
         });
-
-        if (queue_.empty()) {
-            return false;
         }
-
-        output = std::move(queue_.front());
-        queue_.pop_front();
-        return true;
+        
+        return tryPop(output);
     }
 
     void close() noexcept

@@ -15,6 +15,11 @@
 #include <commdlg.h>
 #endif
 
+#if defined(__APPLE__)
+#include <ApplicationServices/ApplicationServices.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -229,7 +234,83 @@ std::string resampleScaleLabel(double scale)
     return label.str();
 }
 
+#if defined(__APPLE__)
+bool cfStringEqualsUtf8(CFStringRef value, const char* expected)
+{
+    if (value == nullptr) {
+        return false;
+    }
+
+    if (const char* direct = CFStringGetCStringPtr(value, kCFStringEncodingUTF8)) {
+        return std::string(direct) == expected;
+    }
+
+    std::array<char, 512> buffer {};
+    return CFStringGetCString(value, buffer.data(), static_cast<CFIndex>(buffer.size()), kCFStringEncodingUTF8)
+        && std::string(buffer.data()) == expected;
+}
+
+std::optional<bool> nativeWindowWithTitleExists(const char* title)
+{
+    CFArrayRef windows = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID);
+    if (windows == nullptr) {
+        return std::nullopt;
+    }
+
+    const pid_t currentPid = getpid();
+    bool found = false;
+    const CFIndex count = CFArrayGetCount(windows);
+    for (CFIndex i = 0; i < count; ++i) {
+        const auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, i));
+        const auto ownerPidValue = static_cast<CFNumberRef>(CFDictionaryGetValue(window, kCGWindowOwnerPID));
+        int ownerPid = 0;
+        if (ownerPidValue == nullptr || !CFNumberGetValue(ownerPidValue, kCFNumberIntType, &ownerPid)
+            || ownerPid != currentPid) {
+            continue;
+        }
+
+        const auto windowName = static_cast<CFStringRef>(CFDictionaryGetValue(window, kCGWindowName));
+        if (cfStringEqualsUtf8(windowName, title)) {
+            found = true;
+            break;
+        }
+    }
+
+    CFRelease(windows);
+    return found;
+}
+#endif
+
+bool pointCloudViewerStopped(pcl::visualization::PCLVisualizer& viewer)
+{
+    return viewer.wasStopped();
+}
+
 } // namespace
+
+bool OpenCvFramePresenter::pointCloudViewerClosed()
+{
+    if (!pointCloudViewer_) {
+        return true;
+    }
+
+    if (pointCloudViewerStopped(*pointCloudViewer_)) {
+        return true;
+    }
+
+#if defined(__APPLE__)
+    if (pointCloudViewerHasSpun_) {
+        const std::optional<bool> nativeWindowExists = nativeWindowWithTitleExists(kPointCloudWindowName);
+        if (nativeWindowExists && *nativeWindowExists) {
+            pointCloudNativeWindowSeen_ = true;
+        } else if (nativeWindowExists && pointCloudNativeWindowSeen_) {
+            return true;
+        }
+    }
+#endif
+
+    return false;
+}
 
 OpenCvFramePresenter::OpenCvFramePresenter()
 {
@@ -1266,15 +1347,15 @@ void OpenCvFramePresenter::updatePointCloudViewer()
         return;
     }
 
-    if (pointCloudViewer_ && pointCloudViewer_->wasStopped()) {
-        pointCloudViewer_.reset();
-        pointCloudViewerHasCloud_ = false;
-        setStreamVisible(frame->first, false);
+    if (pointCloudViewer_ && pointCloudViewerClosed()) {
+        releasePointCloudViewer(true);
         return;
     }
 
     if (!pointCloudViewer_) {
         pointCloudViewer_.reset(new pcl::visualization::PCLVisualizer(kPointCloudWindowName));
+        pointCloudViewerHasSpun_ = false;
+        pointCloudNativeWindowSeen_ = false;
         pointCloudViewer_->setBackgroundColor(0.02, 0.025, 0.03);
         pointCloudViewer_->addCoordinateSystem(0.25);
         pointCloudViewer_->initCameraParameters();
@@ -1371,17 +1452,39 @@ std::string OpenCvFramePresenter::pointCloudHelpText() const
 
 void OpenCvFramePresenter::shutdownPointCloudViewer()
 {
-    if (!pointCloudViewer_) {
-        pointCloudViewerHasCloud_ = false;
+    const bool viewerClosed = pointCloudViewerClosed();
+    auto viewer = std::move(pointCloudViewer_);
+    pointCloudViewerHasCloud_ = false;
+    pointCloudViewerHasSpun_ = false;
+    pointCloudNativeWindowSeen_ = false;
+    if (!viewer) {
         return;
     }
 
-    if (!pointCloudViewer_->wasStopped()) {
-        pointCloudViewer_->close();
+    if (!viewerClosed) {
+        try {
+            viewer->close();
+        } catch (...) {
+        }
     }
+}
 
+void OpenCvFramePresenter::releasePointCloudViewer(bool hidePointCloudStreams)
+{
     pointCloudViewer_.reset();
     pointCloudViewerHasCloud_ = false;
+    pointCloudViewerHasSpun_ = false;
+    pointCloudNativeWindowSeen_ = false;
+
+    if (!hidePointCloudStreams) {
+        return;
+    }
+
+    for (const auto& [name, frame] : latestPointCloudFrames_) {
+        (void)frame;
+        streamVisibility_[name] = false;
+    }
+    setPointCloudConversionEnabled(false);
 }
 
 void OpenCvFramePresenter::spinPointCloudViewer()
@@ -1390,17 +1493,22 @@ void OpenCvFramePresenter::spinPointCloudViewer()
         return;
     }
 
-    if (pointCloudViewer_->wasStopped()) {
-        pointCloudViewer_.reset();
-        pointCloudViewerHasCloud_ = false;
-        for (const auto& [name, frame] : latestPointCloudFrames_) {
-            (void)frame;
-            setStreamVisible(name, false);
-        }
+    if (pointCloudViewerClosed()) {
+        releasePointCloudViewer(true);
         return;
     }
 
-    pointCloudViewer_->spinOnce(1, false);
+    try {
+        pointCloudViewer_->spinOnce(1, false);
+        pointCloudViewerHasSpun_ = true;
+    } catch (...) {
+        releasePointCloudViewer(true);
+        return;
+    }
+
+    if (pointCloudViewer_ && pointCloudViewerClosed()) {
+        releasePointCloudViewer(true);
+    }
 }
 
 std::vector<std::string> OpenCvFramePresenter::visibleVideoStreams() const

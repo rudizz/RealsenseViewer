@@ -2,7 +2,7 @@
 
 #include "realsenseviewer/camera/IFrameSource.hpp"
 #include "realsenseviewer/camera/RealSenseFrameProcessor.hpp"
-#include "realsenseviewer/concurrency/BoundedQueue.hpp"
+#include "realsenseviewer/concurrency/ConcurrentQueue.hpp"
 
 #include <librealsense2/rs.hpp>
 
@@ -74,8 +74,8 @@ private:
     rs2::context context_;
     rs2::pipeline pipeline_;
     RealSenseFrameProcessor processor_;
-    BoundedQueue<rs2::frameset> capturedFrames_;
-    BoundedQueue<FrameBundle> processedFrames_;
+    ConcurrentQueue<rs2::frameset> capturedFrames_;
+    ConcurrentQueue<FrameBundle> processedFrames_;
     std::thread captureThread_;
     std::thread processingThread_;
     std::mutex workerExceptionMutex_;

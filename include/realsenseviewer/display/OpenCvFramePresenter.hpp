@@ -58,7 +58,9 @@ private:
     void adjustPointCloudPixelStep(int delta);
     void updatePointCloudHelpText();
     [[nodiscard]] std::string pointCloudHelpText() const;
+    [[nodiscard]] bool pointCloudViewerClosed();
     void shutdownPointCloudViewer();
+    void releasePointCloudViewer(bool hidePointCloudStreams);
     void spinPointCloudViewer();
     [[nodiscard]] std::vector<std::string> visibleVideoStreams() const;
     [[nodiscard]] std::vector<std::string> visiblePointCloudStreams() const;
@@ -87,6 +89,8 @@ private:
     std::optional<double> latestFeatureMatchMs_;
     std::unique_ptr<pcl::visualization::PCLVisualizer, PclVisualizerDeleter> pointCloudViewer_;
     bool pointCloudViewerHasCloud_ = false;
+    bool pointCloudViewerHasSpun_ = false;
+    bool pointCloudNativeWindowSeen_ = false;
     bool objectDetectionEnabled_ = false;
     bool detectorDropdownOpen_ = false;
     bool matcherDropdownOpen_ = false;
