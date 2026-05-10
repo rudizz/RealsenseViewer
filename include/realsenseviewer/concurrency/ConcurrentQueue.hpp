@@ -20,8 +20,12 @@ public:
         }
     }
 
+    ~ConcurrentQueue() = default;
     ConcurrentQueue(const ConcurrentQueue&) = delete;
     ConcurrentQueue& operator=(const ConcurrentQueue&) = delete;
+    ConcurrentQueue(ConcurrentQueue&&) = delete;
+    ConcurrentQueue& operator=(ConcurrentQueue&&) = delete;
+
 
     bool tryPush(T item)
     {
@@ -42,13 +46,7 @@ public:
     bool tryPop(T& output)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (queue_.empty()) {
-            return false;
-        }
-
-        output = std::move(queue_.front());
-        queue_.pop_front();
-        return true;
+        return popUnlocked(output);
     }
 
     bool waitPop(T& output)
@@ -60,7 +58,7 @@ public:
         });
         }
         
-        return tryPop(output);
+        return popUnlocked(output);
     }
 
     void close() noexcept
@@ -94,6 +92,18 @@ private:
     std::deque<T> queue_;
     std::size_t droppedCount_ = 0;
     bool closed_ = false;
+
+    bool popUnlocked(T& output)
+    {
+        if (queue_.empty()) {
+            return false;
+        }
+
+        output = std::move(queue_.front());
+        queue_.pop_front();
+        return true;
+    }
+
 };
 
 } // namespace rsv

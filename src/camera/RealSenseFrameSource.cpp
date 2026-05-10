@@ -124,25 +124,22 @@ void RealSenseFrameSource::stop() noexcept
         return;
     }
 
-    capturedFrames_.close();
-
     try {
         pipeline_.stop();
     } catch (const rs2::error& error) {
         std::cerr << "Could not stop RealSense pipeline cleanly: " << error.what() << "\n";
     }
+    
+    capturedFrames_.close();
+    processedFrames_.close();
 
     if (captureThread_.joinable()) {
         captureThread_.join();
     }
-
-    capturedFrames_.close();
-
+    
     if (processingThread_.joinable()) {
         processingThread_.join();
     }
-
-    processedFrames_.close();
 }
 
 bool RealSenseFrameSource::poll(FrameBundle& output)
@@ -436,7 +433,7 @@ std::optional<RealSenseFrameSource::VideoProfileChoice> RealSenseFrameSource::se
     const std::vector<rs2_format>& preferredFormats) const
 {
     std::optional<VideoProfileChoice> best;
-
+    
     for (const rs2::sensor& sensor : device.query_sensors()) {
         for (const rs2::stream_profile& profile : sensor.get_stream_profiles()) {
             const auto videoProfile = profile.as<rs2::video_stream_profile>();

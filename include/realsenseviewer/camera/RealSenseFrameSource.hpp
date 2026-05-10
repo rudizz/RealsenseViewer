@@ -27,7 +27,12 @@ struct RealSenseSettings {
 class RealSenseFrameSource final : public IFrameSource {
 public:
     explicit RealSenseFrameSource(RealSenseSettings settings = {});
+    
     ~RealSenseFrameSource() override;
+    RealSenseFrameSource(const RealSenseFrameSource&) = delete;
+    RealSenseFrameSource& operator=(const RealSenseFrameSource&) = delete;
+    RealSenseFrameSource(RealSenseFrameSource&&) = delete;
+    RealSenseFrameSource& operator=(RealSenseFrameSource&&) = delete;
 
     void start() override;
     void stop() noexcept override;
