@@ -51,13 +51,11 @@ public:
 
     bool waitPop(T& output)
     {
-        {
         std::unique_lock<std::mutex> lock(mutex_);
         available_.wait(lock, [this] {
             return closed_ || !queue_.empty();
         });
-        }
-        
+
         return popUnlocked(output);
     }
 

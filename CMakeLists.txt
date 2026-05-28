@@ -14,6 +14,17 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
 endif()
 
+include(CTest)
+
+option(RSV_BUILD_VIEWER "Build the RealSense viewer application" ON)
+
+if(NOT RSV_BUILD_VIEWER)
+    if(BUILD_TESTING)
+        add_subdirectory(tests)
+    endif()
+    return()
+endif()
+
 find_package(OpenCV REQUIRED COMPONENTS calib3d core features2d highgui imgcodecs imgproc xfeatures2d)
 find_package(PCL REQUIRED COMPONENTS common filters visualization)
 find_package(realsense2 CONFIG QUIET
@@ -56,6 +67,7 @@ endif()
 add_executable(RealsenseViewer
     RealsenseViewer.cpp
     src/Application.cpp
+    src/CommandLineOptions.cpp
     src/camera/RealSenseDiagnostics.cpp
     src/camera/RealSenseFrameProcessor.cpp
     src/camera/RealSenseFrameSource.cpp
@@ -126,4 +138,8 @@ if(APPLE AND DSYMUTIL_EXECUTABLE)
         COMMENT "Generating RealsenseViewer.dSYM"
         VERBATIM
     )
+endif()
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()

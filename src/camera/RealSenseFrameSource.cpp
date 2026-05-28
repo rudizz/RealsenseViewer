@@ -104,7 +104,7 @@ void RealSenseFrameSource::start()
         nextNoFrameWarning_ = std::chrono::steady_clock::now() + kNoFrameWarningInterval;
         processingThread_ = std::thread(&RealSenseFrameSource::processingLoop, this);
         captureThread_ = std::thread(&RealSenseFrameSource::captureLoop, this);
-        std::cout << "RealSense pipeline started. Press q or Esc in the OpenCV dashboard to quit.\n";
+        std::clog << "RealSense pipeline started. Press q or Esc in the OpenCV dashboard to quit.\n";
     } catch (const rs2::error& error) {
         std::ostringstream message;
         message << "could not start RealSense pipeline: " << error.what()
@@ -267,18 +267,18 @@ void RealSenseFrameSource::configureD455DefaultStreams(rs2::config& config) cons
     config.enable_stream(RS2_STREAM_DEPTH, 0, 848, 480, RS2_FORMAT_Z16, 30);
     config.enable_stream(RS2_STREAM_COLOR, 0, 1280, 720, RS2_FORMAT_BGR8, 30);
 
-    std::cout << "Using D455 default video streams: depth, color";
+    std::clog << "Using D455 default video streams: depth, color";
     if (settings_.enableInfraredStreams) {
         config.enable_stream(RS2_STREAM_INFRARED, 1, 848, 480, RS2_FORMAT_Y8, 30);
         config.enable_stream(RS2_STREAM_INFRARED, 2, 848, 480, RS2_FORMAT_Y8, 30);
-        std::cout << ", infrared 1, infrared 2";
+        std::clog << ", infrared 1, infrared 2";
     }
-    std::cout << "\n" << std::flush;
+    std::clog << "\n" << std::flush;
 
     if (settings_.enableMotionStreams) {
         config.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 63);
         config.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 200);
-        std::cout << "Motion streams requested: accel @63fps, gyro @200fps\n";
+        std::clog << "Motion streams requested: accel @63fps, gyro @200fps\n";
     }
 }
 
@@ -312,11 +312,11 @@ void RealSenseFrameSource::configureAutoDetectedStreams(rs2::config& config)
             request.formats);
 
         if (!selected) {
-            std::cout << "Skipping unavailable stream " << streamTypeName(request.stream);
+            std::clog << "Skipping unavailable stream " << streamTypeName(request.stream);
             if (request.index > 0) {
-                std::cout << " " << request.index;
+                std::clog << " " << request.index;
             }
-            std::cout << "\n";
+            std::clog << "\n";
             continue;
         }
 
@@ -328,11 +328,11 @@ void RealSenseFrameSource::configureAutoDetectedStreams(rs2::config& config)
             selected->format,
             selected->fps);
 
-        std::cout << "Enabled " << streamTypeName(selected->stream);
+        std::clog << "Enabled " << streamTypeName(selected->stream);
         if (selected->index > 0) {
-            std::cout << " " << selected->index;
+            std::clog << " " << selected->index;
         }
-        std::cout << " " << selected->width << "x" << selected->height << " "
+        std::clog << " " << selected->width << "x" << selected->height << " "
                   << formatName(selected->format) << " @" << selected->fps << "fps\n";
         ++enabledStreams;
     }
@@ -354,11 +354,11 @@ void RealSenseFrameSource::configureAutoDetectedStreams(rs2::config& config)
                 request.formats);
 
             if (!selected) {
-                std::cout << "Skipping unavailable stream " << streamTypeName(request.stream);
+                std::clog << "Skipping unavailable stream " << streamTypeName(request.stream);
                 if (request.index > 0) {
-                    std::cout << " " << request.index;
+                    std::clog << " " << request.index;
                 }
-                std::cout << "\n";
+                std::clog << "\n";
                 continue;
             }
 
@@ -370,28 +370,28 @@ void RealSenseFrameSource::configureAutoDetectedStreams(rs2::config& config)
                 selected->format,
                 selected->fps);
 
-            std::cout << "Enabled " << streamTypeName(selected->stream);
+            std::clog << "Enabled " << streamTypeName(selected->stream);
             if (selected->index > 0) {
-                std::cout << " " << selected->index;
+                std::clog << " " << selected->index;
             }
-            std::cout << " " << selected->width << "x" << selected->height << " "
+            std::clog << " " << selected->width << "x" << selected->height << " "
                       << formatName(selected->format) << " @" << selected->fps << "fps\n";
             ++enabledStreams;
         }
     } else {
-        std::cout << "Infrared streams disabled\n";
+        std::clog << "Infrared streams disabled\n";
     }
 
     if (settings_.enableMotionStreams) {
         for (rs2_stream stream : {RS2_STREAM_ACCEL, RS2_STREAM_GYRO}) {
             auto selected = selectMotionProfile(device, stream);
             if (!selected) {
-                std::cout << "Skipping unavailable stream " << streamTypeName(stream) << "\n";
+                std::clog << "Skipping unavailable stream " << streamTypeName(stream) << "\n";
                 continue;
             }
 
             config.enable_stream(selected->stream, selected->format, selected->fps);
-            std::cout << "Enabled " << streamTypeName(selected->stream) << " "
+            std::clog << "Enabled " << streamTypeName(selected->stream) << " "
                       << formatName(selected->format) << " @" << selected->fps << "fps\n";
             ++enabledStreams;
         }
