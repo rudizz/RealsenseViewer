@@ -1,7 +1,9 @@
 # RealsenseViewer with 2D Object detection
 
-C++17 RealSense D455 viewer using librealsense for capture and OpenCV for display.
-It has a 2D Object detection section where you can load a calibration image and it looks for it in the live Color image.
+https://github.com/user-attachments/assets/4bb1dd34-508c-487b-89f6-26d0e07abed4
+
+A RealSense D455 viewer written in C++17 that uses librealsense for data acquisition and OpenCV for visualization.
+It includes a section dedicated to 2D object detection, where you can load a calibration image, which is then searched for in the Color image in real time.
 
 The Object detector supports the following options:
  - Feature Detector: SIFT, SURF, ORB.
